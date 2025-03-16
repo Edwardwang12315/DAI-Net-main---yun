@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--batch_size',
-                    default=8, type=int,
+                    default=16, type=int,
                     help='Batch size for training')
 parser.add_argument('--model',
                     default='dark', type=str,
@@ -247,6 +247,7 @@ def train():
                         loss_c_pal1.item(), loss_l_pa1l.item()))
                     print('->> pal2 conf loss:{:.4f} || pal2 loc loss:{:.4f}'.format(
                         loss_c_pal2.item(), loss_l_pa12.item()))
+                    print('->> mutual loss:{:.4f}'.format(loss_mutual.item()))
                     print('->>lr:{}'.format(optimizer.param_groups[0]['lr']))
 
             if iteration != 0 and iteration % 5000 == 0:
@@ -284,11 +285,11 @@ def val(epoch, net, dsfd_net, criterion):
             targets = [Variable(ann, volatile=True) for ann in targets]
         img_dark = torch.stack([Low_Illumination_Degrading(images[i])[0] for i in range(images.shape[0])],
                                dim=0)
-        out = net.module.test_forward(x_dark=img_dark, x_light=images)
+        out, loss_mutual = net.module.test_forward(x_dark=img_dark, x_light=images)
 
-        # loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
+        loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
         loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)
-        loss = loss_l_pa12 + loss_c_pal2
+        loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
 
         losses += loss.item()
         step += 1
