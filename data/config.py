@@ -53,7 +53,7 @@ _C.VARIANCE = [0.1, 0.2]
 # detection config
 _C.NMS_THRESH = 0.1
 _C.NMS_TOP_K = 5000
-_C.TOP_K = 50
+_C.TOP_K = 750
 _C.CONF_THRESH = 0.05
 
 # loss config
