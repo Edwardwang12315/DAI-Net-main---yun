@@ -451,7 +451,6 @@ class DSFD( nn.Module ) :
 			Lap_pyrs_light[ 0 ] = (Lap_pyrs_light[ 0 ] * self.illumination_global( x_light , level = self.num_high ))
 
 			# 不同来源 图像重建
-
 			# 照明调整 Lap:LF HF4 HF3 HF2 HF1
 			Lap_illum = Lap_pyrs_dark
 			Lap_region = Lap_pyrs_dark
@@ -461,10 +460,10 @@ class DSFD( nn.Module ) :
 			Lap_highLvl[ 0 ] = Lap_pyrs_dark[ 0 ]  # HF_region+LF_enhanc,证明暗图高频提取准确
 			# 亮度调整
 			img_out = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
-			# img_illum = self.lap_pyramid.pyramid_recons( Lap_illum )  # 证明暗图调整后接近源域亮度
-			# img_region = self.lap_pyramid.pyramid_recons( Lap_region )  # 证明暗图高频提取准确
+			img_illum = self.lap_pyramid.pyramid_recons( Lap_illum )  # 证明暗图调整后接近源域亮度
+			img_region = self.lap_pyramid.pyramid_recons( Lap_region )  # 证明暗图高频提取准确
 			# 细节增强
-			# img_highlvl = self.lap_pyramid.pyramid_recons( Lap_highLvl )  # 证明根据亮度动态调整
+			img_highlvl = self.lap_pyramid.pyramid_recons( Lap_highLvl )  # 证明根据亮度动态调整
 			del Lap_illum , Lap_region , Lap_highLvl , Lap_pyrs_dark , Lap_pyrs_region , Lap_pyrs_light
 
 			# 检测通路特征提取
