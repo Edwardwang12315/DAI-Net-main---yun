@@ -216,10 +216,10 @@ class Trans_low( nn.Module ) :
 		self.encoder = nn.Sequential( nn.Conv2d( 3 , 16 , 3 , padding = 1 ) , nn.LeakyReLU( True ) ,
 		                              nn.Conv2d( 16 , ch_blocks , 3 , padding = 1 ) , nn.LeakyReLU( True ) )
 
-		self.mm1 = nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 1 , padding = 0 )
-		self.mm2 = nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 3 , padding = 3 // 2 )
-		self.mm3 = nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 5 , padding = 5 // 2 )
-		self.mm4 = nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 7 , padding = 7 // 2 )
+		self.mm1 = nn.Sequential(nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 1 , padding = 0 ))
+		self.mm2 = nn.Sequential(nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 3 , padding = 3 // 2 ))
+		self.mm3 = nn.Sequential(nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 5 , padding = 5 // 2 ))
+		self.mm4 = nn.Sequential(nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 7 , padding = 7 // 2 ))
 
 		self.decoder = nn.Sequential( nn.Conv2d( ch_blocks , 16 , 3 , padding = 1 ) , nn.LeakyReLU( True ) ,
 		                              nn.Conv2d( 16 , 3 , 3 , padding = 1 ) )
@@ -259,8 +259,8 @@ class DownAttention_onlyA(nn.Module):
 		# assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
 		padding = 3 if kernel_size == 7 else 1
 		self.downsample = nn.Sequential(nn.Conv2d(3, 3, kernel_size, padding=padding, stride = 2),nn.ReLU( True ) ,)
-		self.conv = nn.Conv2d(2, 1, kernel_size, padding=padding)
-		self.sigmoid = nn.Sigmoid()
+		self.conv = nn.Sequential(nn.Conv2d(2, 1, kernel_size, padding=padding))
+		self.sigmoid = nn.Sequential(nn.Sigmoid())
 
 		self.downsample.apply( weight_init)
 		self.conv.apply( weight_init)
@@ -290,8 +290,8 @@ class SpatialAttention_plusx(nn.Module):
 		super().__init__()
 		# assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
 		padding = 3 if kernel_size == 7 else 1
-		self.conv = nn.Conv2d(2, 1, kernel_size, padding=padding)
-		self.sigmoid = nn.Sigmoid()
+		self.conv = nn.Sequential(nn.Conv2d(2, 1, kernel_size, padding=padding))
+		self.sigmoid = nn.Sequential(nn.Sigmoid())
 
 		self.conv.apply( weight_init)
 	def forward(self,x):
@@ -470,30 +470,30 @@ class DSFD( nn.Module ) :
 			# 检测通路特征提取
 			for k in range( 14 ) :
 				img_out = self.vgg[ k ]( img_out )
-				# if k == 4 :
-				# 	x_out = img_out
+				if k == 4 :
+					x_out = img_out
 			x = img_out
 
 			# 简单处理
-			# for k in range( 5 ) :
-			# 	img_illum = self.vgg[ k ]( img_illum )
-			# 	img_region = self.vgg[ k ]( img_region )
-			# 	img_highlvl = self.vgg[ k ]( img_highlvl )
+			for k in range( 5 ) :
+				img_illum = self.vgg[ k ]( img_illum )
+				img_region = self.vgg[ k ]( img_region )
+				img_highlvl = self.vgg[ k ]( img_highlvl )
 
-			# x_illum = img_illum
-			# x_region = img_region
-			# x_highlvl = img_highlvl
-			# del img_illum , img_region , img_highlvl
+			x_illum = img_illum
+			x_region = img_region
+			x_highlvl = img_highlvl
+			del img_illum , img_region , img_highlvl
 
-			# x_out = x_out.flatten( start_dim = 2 ).mean( dim = -1 )
-			# x_illum = x_illum.flatten( start_dim = 2 ).mean( dim = -1 )
-			# x_region = x_region.flatten( start_dim = 2 ).mean( dim = -1 )
-			# x_highlvl = x_highlvl.flatten( start_dim = 2 ).mean( dim = -1 )
+			x_out = x_out.flatten( start_dim = 2 ).mean( dim = -1 )
+			x_illum = x_illum.flatten( start_dim = 2 ).mean( dim = -1 )
+			x_region = x_region.flatten( start_dim = 2 ).mean( dim = -1 )
+			x_highlvl = x_highlvl.flatten( start_dim = 2 ).mean( dim = -1 )
 			# 明暗图调整后亮度相同,亮图调整后亮度不变
-			# loss_mutual = cfg.WEIGHT.MC * (
-			# 		self.KL( x_out , x_illum ) + self.KL( x_illum , x_out ) + self.KL( x_region , x_illum ) + self.KL(
-			# 		x_illum , x_region ) + self.KL( x_out , x_highlvl ) + self.KL( x_highlvl , x_out ))
-			# del x_out , x_illum , x_region , x_highlvl
+			loss_mutual = cfg.WEIGHT.MC * (
+					self.KL( x_out , x_illum ) + self.KL( x_illum , x_out ) + self.KL( x_region , x_illum ) + self.KL(
+					x_illum , x_region ) + self.KL( x_out , x_highlvl ) + self.KL( x_highlvl , x_out ))
+			del x_out , x_illum , x_region , x_highlvl
 
 			of1 = x
 			s = self.L2Normof1( of1 )
@@ -595,7 +595,7 @@ class DSFD( nn.Module ) :
 			del loc_pal1 , conf_pal1 , loc_pal2 , conf_pal2
 			del x , of1 , of2 , of3 , of4 , of5 , of6 , s
 
-		return output
+		return output,loss_mutual
 
 	# during training, the model takes the paired images, and their pseudo GT illumination maps from the Retinex Decom Net
 	def forward( self , x_dark , x_light ) :
@@ -671,7 +671,7 @@ class DSFD( nn.Module ) :
 		# del Lap_illum,Lap_region,Lap_highLvl,Lap_pyrs_dark,Lap_pyrs_region,Lap_pyrs_light
 
 		# 检测通路特征提取
-		for k in range( 14 ) :
+		for k in range( 14 ) :#vgg13: 14 vgg16: 16
 			img_out = self.vgg[ k ]( img_out )
 			if k == 4 :
 				x_out = img_out.detach()
@@ -703,19 +703,19 @@ class DSFD( nn.Module ) :
 		s = self.L2Normof1( of1 )
 		pal1_sources.append( s )
 		# apply vgg up to fc7
-		for k in range( 14 , 19 ) :
+		for k in range( 14 , 19 ) :#vgg13: 14,19 vgg16: 16,23
 			x = self.vgg[ k ]( x )
 		of2 = x
 		s = self.L2Normof2( of2 )
 		pal1_sources.append( s )
 
-		for k in range( 19 , 24 ) :
+		for k in range( 19 , 24 ) :#vgg13: 19,24 vgg16: 23,30
 			x = self.vgg[ k ]( x )
 		of3 = x
 		s = self.L2Normof3( of3 )
 		pal1_sources.append( s )
 
-		for k in range( 24 , len( self.vgg ) ) :
+		for k in range( 24 , len( self.vgg ) ) :#vgg13: 24 vgg16: 30
 			x = self.vgg[ k ]( x )
 		of4 = x
 		pal1_sources.append( of4 )
@@ -896,7 +896,7 @@ def add_extras( cfg , i , batch_norm = False ) :
 def multibox( vgg , extra_layers , num_classes ) :
 	loc_layers = [ ]
 	conf_layers = [ ]
-	vgg_source = [ 12 , 17 , 22 , -2 ]
+	vgg_source = [ 12 , 17 , 22 , -2 ]#vgg13: [ 12 , 17 , 22 , -2 ] vgg16: [14, 21, 28, -2]
 
 	for k , v in enumerate( vgg_source ) :
 		# print(v)
