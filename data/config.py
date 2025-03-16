@@ -64,7 +64,7 @@ _C.WEIGHT = EasyDict()
 _C.WEIGHT.EQUAL_R = 0.01
 _C.WEIGHT.SMOOTH = 0.5
 _C.WEIGHT.RC = 0.001
-_C.WEIGHT.MC = 0.01
+_C.WEIGHT.MC = 100
 
 # face config
 _C.FACE = EasyDict()
