@@ -77,7 +77,7 @@ class SFT_layer( nn.Module ) :
 		x = self.encoder( x )
 		scale = self.scale_conv( guide )
 		shift = self.shift_conv( guide )
-		x += (x * scale + shift).detach()
+		x += (x * scale + shift)
 		x = self.decoder( x )
 
 		del scale , shift
@@ -240,11 +240,11 @@ class Trans_low( nn.Module ) :
 		x1_2 = self.mm2( x1 )
 		x1_3 = self.mm3( x1 )
 		x1_4 = self.mm4( x1 )
-		x1 = torch.cat( [ x1_1 , x1_2 , x1_3 , x1_4 ] , dim = 1 ).detach()
+		x1 = torch.cat( [ x1_1 , x1_2 , x1_3 , x1_4 ] , dim = 1 )
 		x1 = self.decoder( x1 )
 
-		out = (x + x1).detach()
-		out = torch.relu( out ).detach()  # 当前通道输出
+		out = (x + x1)
+		out = torch.relu( out )  # 当前通道输出
 
 		mask = self.trans_guide( torch.cat( [ x , out ] , dim = 1 ) )  # 输出给high-layer
 
@@ -277,9 +277,9 @@ class DownAttention_onlyA(nn.Module):
 			# print('attention=',attention.shape)
 		# 2*h*w
 		attention = self.conv( attention )
-		# print('attention=',attention.shape)
+
 		# 1*h*w
-		out=self.sigmoid( attention ).detach()
+		out=self.sigmoid( attention )
 
 		del avg_out,max_out,x,level,attention
 		torch.cuda.empty_cache()
@@ -302,12 +302,10 @@ class SpatialAttention_plusx(nn.Module):
 			max_out , _ = torch.max( x , dim = 1 , keepdim = True )
 			# print('max_out=',max_out.shape)
 			attention = torch.cat( [ avg_out , max_out ] , dim = 1 )
-			# print('attention=',attention.shape)
 		# 2*h*w
 		attention = self.conv( attention )
-		# print('attention=',attention.shape)
 		# 1*h*w
-		out=(self.sigmoid( attention )*x).detach()
+		out=(self.sigmoid( attention )*x)
 
 		del avg_out,max_out,x,attention
 		return out
@@ -574,10 +572,12 @@ class DSFD( nn.Module ) :
 			conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
 
 			priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
-			self.priors_pal1 = Variable( priorbox.forward() , volatile = True )
+			with torch.no_grad() :
+				self.priors_pal1 = priorbox.forward()
 
 			priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
-			self.priors_pal2 = Variable( priorbox.forward() , volatile = True )
+			with torch.no_grad() :
+				self.priors_pal2 = priorbox.forward()
 
 			if self.phase == 'test' :
 				output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
@@ -615,13 +615,13 @@ class DSFD( nn.Module ) :
 		# 跨频率指导
 		LF , guide = self.pipline_LF( pyrs_dark[ -1 ] )  # LF通道的两个返回值
 		Lap_pyrs_dark.append( LF ) # LF
-		# del LF
+		del LF
 
 		# LF向上传递
 		for i in range( self.num_high ) :
 			guide = self.__getattr__( 'up_guide_layer_{}'.format( i ) )( guide )
 			commom_guide.append( guide )
-		# del guide
+		del guide
 
 		# HFs完整通路
 		for i in range( self.num_high ) :
@@ -629,7 +629,7 @@ class DSFD( nn.Module ) :
 			HFs = self.__getattr__( 'pipline_HFs{}'.format( i ) )( pyrs_dark[ -2 - i ] ,
 			                                                       commom_guide[ i ] )  # HF4 HF3 HF2 HF1
 			Lap_pyrs_dark.append( HFs ) # LF HF4 HF3 HF2 HF1
-		# del pyrs_dark,HFs
+		del pyrs_dark,HFs
 
 		# HFs向下 细节增强
 		for i in range( self.num_high ) :
@@ -643,14 +643,15 @@ class DSFD( nn.Module ) :
 		Lap_pyrs_light = [ ]
 		Lap_pyrs_region = [ ]
 		# 整理输出
-		pyrs_light = self.lap_pyramid.pyramid_decom( img = x_light )  # HF1 HF2 HF3 HF4 LF
-		for i in range( self.num_high ) :
-			Lap_pyrs_light.append( pyrs_light[ -1 - i ] )  # LF HF4 HF3 HF2 HF1
-		# del pyrs_light
+		with torch.no_grad() :
+			pyrs_light = self.lap_pyramid.pyramid_decom( img = x_light )  # HF1 HF2 HF3 HF4 LF
+			for i in range( self.num_high ) :
+				Lap_pyrs_light.append( pyrs_light[ -1 - i ] )  # LF HF4 HF3 HF2 HF1
+		del pyrs_light
 
 		# 全局亮度调整
 		Lap_pyrs_region = Lap_pyrs_light
-		Lap_pyrs_light[ 0 ] = (Lap_pyrs_light[ 0] * self.illumination_global( x_light ,level=self.num_high)).detach()
+		Lap_pyrs_light[ 0 ] = (Lap_pyrs_light[ 0] * self.illumination_global( x_light ,level=self.num_high))
 
 		# 不同来源 图像重建
 		with torch.no_grad() :
@@ -662,19 +663,18 @@ class DSFD( nn.Module ) :
 			Lap_region[ 0 ] = Lap_pyrs_region[ 0 ]  # HF_enhanc+LF_region,证明暗图调整后接近源域亮度
 			Lap_highLvl[ 0 ] = Lap_pyrs_dark[ 0 ] # HF_region+LF_enhanc,证明暗图高频提取准确
 			# 亮度调整
-			img_out = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
+			x = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
 			img_illum = self.lap_pyramid.pyramid_recons( Lap_illum )  # 证明暗图调整后接近源域亮度
 			img_region = self.lap_pyramid.pyramid_recons( Lap_region )  # 证明暗图高频提取准确
 			# 细节增强
 			img_highlvl = self.lap_pyramid.pyramid_recons( Lap_highLvl )  # 证明根据亮度动态调整
-		# del Lap_illum,Lap_region,Lap_highLvl,Lap_pyrs_dark,Lap_pyrs_region,Lap_pyrs_light
+			del Lap_illum,Lap_region,Lap_highLvl,Lap_pyrs_dark,Lap_pyrs_region,Lap_pyrs_light
 
 		# 检测通路特征提取
 		for k in range( 14 ) :#vgg13: 14 vgg16: 16
-			img_out = self.vgg[ k ]( img_out )
+			x = self.vgg[ k ]( x )
 			if k == 4 :
-				x_out = img_out.detach()
-		x = img_out.detach()
+				x_out = x
 		# 简单处理
 		for k in range( 5 ) :
 			# print(x_out.shape)
@@ -686,17 +686,17 @@ class DSFD( nn.Module ) :
 			x_illum = img_illum
 			x_region = img_region
 			x_highlvl = img_highlvl
-			# del img_illum , img_region , img_highlvl
+			del img_illum , img_region , img_highlvl
 
 			x_out = x_out.flatten( start_dim = 2 ).mean( dim = -1 )
 			x_illum = x_illum.flatten( start_dim = 2 ).mean( dim = -1 )
 			x_region = x_region.flatten( start_dim = 2 ).mean( dim = -1 )
 			x_highlvl = x_highlvl.flatten( start_dim = 2 ).mean( dim = -1 )
 			# 明暗图调整后亮度相同,亮图调整后亮度不变
-		loss_mutual = cfg.WEIGHT.MC * (
-					self.KL( x_out , x_illum ) + self.KL( x_illum , x_out ) + self.KL( x_region , x_illum ) + self.KL(
-					x_illum , x_region ) + self.KL( x_out , x_highlvl ) + self.KL( x_highlvl , x_out ))
-			# del x_out,x_illum,x_region,x_highlvl
+			loss_mutual = cfg.WEIGHT.MC * (
+						self.KL( x_out , x_illum ) + self.KL( x_illum , x_out ) + self.KL( x_region , x_illum ) + self.KL(
+						x_illum , x_region ) + self.KL( x_out , x_highlvl ) + self.KL( x_highlvl , x_out ))
+			del x_out,x_illum,x_region,x_highlvl
 
 		of1 = x  # 16个vgg后的输出
 		s = self.L2Normof1( of1 )
@@ -778,10 +778,10 @@ class DSFD( nn.Module ) :
 
 		priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
 		with torch.no_grad() :
-			self.priors_pal1 = Variable( priorbox.forward() , volatile = True )
+			self.priors_pal1 =  priorbox.forward()
 		priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
 		with torch.no_grad() :
-			self.priors_pal2 = Variable( priorbox.forward() , volatile = True )
+			self.priors_pal2 = priorbox.forward()
 
 		if self.phase == 'test' :
 			output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
@@ -794,11 +794,11 @@ class DSFD( nn.Module ) :
 			          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
 			          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
 
-		# del ef1,ef2,ef3,ef4,ef5,ef6,conv3,conv4,conv5,convfc7_2,conv6,conv7
-		# del pal1_sources , pal2_sources,feat,priorbox,features_maps
-		# del loc_pal1,conf_pal1,loc_pal2,conf_pal2
-		# del x , of1 , of2 , of3 , of4 , of5 , of6 , s
-		# torch.cuda.empty_cache()
+		del ef1,ef2,ef3,ef4,ef5,ef6,conv3,conv4,conv5,convfc7_2,conv6,conv7
+		del pal1_sources , pal2_sources,feat,priorbox,features_maps
+		del loc_pal1,conf_pal1,loc_pal2,conf_pal2
+		del x , of1 , of2 , of3 , of4 , of5 , of6 , s
+		torch.cuda.empty_cache()
 
 		return output , loss_mutual
 
