@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--batch_size',
-                    default=1, type=int,
+                    default=2, type=int,
                     help='Batch size for training')
 parser.add_argument('--model',
                     default='dark', type=str,
@@ -40,13 +40,13 @@ parser.add_argument('--resume',
                     default=None, type=str,
                     help='Checkpoint state_dict file to resume training from')
 parser.add_argument('--num_workers',
-                    default=4, type=int,
+                    default=1, type=int,
                     help='Number of workers used in dataloading')
 parser.add_argument('--cuda',
                     default=True, type=bool,
                     help='Use CUDA to train model')
 parser.add_argument('--lr', '--learning-rate',
-                    default=1e-3, type=float,
+                    default=3e-4, type=float,
                     help='initial learning rate')
 parser.add_argument('--momentum',
                     default=0.9, type=float,
@@ -118,7 +118,7 @@ min_loss = np.inf
 
 
 def train():
-    per_epoch_size = len(train_dataset) // (args.batch_size * torch.cuda.device_count())
+    per_epoch_size = len(train_dataset) // (args.batch_size * torch.cuda.device_count())/100
     start_epoch = 0
     iteration = 0
     step_index = 0
@@ -176,8 +176,6 @@ def train():
     optimizer = optim.SGD(param_group, lr=lr, momentum=args.momentum,
                           weight_decay=args.weight_decay)
 
-    scaler = torch.cuda.amp.GradScaler()  # 添加: 初始化GradScaler
-
     if args.cuda:
         if args.multigpu:
             # 采用数据并行模型，多gpu
@@ -211,9 +209,8 @@ def train():
                 targetss = [ann.cuda() for ann in targets]
             img_dark = torch.empty(size=(images.shape[0], images.shape[1], images.shape[2], images.shape[3])).cuda()
             # Generation of degraded data and AET groundtruth
-            with torch.no_grad() :
-                for i in range(images.shape[0]):
-                    img_dark[i], _ = Low_Illumination_Degrading(images[i])#ISP方法生成低照度图像
+            for i in range(images.shape[0]):
+                img_dark[i], _ = Low_Illumination_Degrading(images[i])#ISP方法生成低照度图像
 
             if iteration in cfg.LR_STEPS:
                 step_index += 1
@@ -221,21 +218,23 @@ def train():
 
             # 前向传播两个分支
             t0 = time.time()
-            out, loss_mutual = net(img_dark, images)
+            out,loss_mutual = net(x_dark=img_dark, x_light=images)
 
             # 损失函数整理
             loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targetss)
             loss_l_pa12, loss_c_pal2 = criterion(out[3:], targetss)
             loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
+            # loss=loss_mutual
 
             loss.backward()
             optimizer.zero_grad()
+
             torch.nn.utils.clip_grad_norm_( net.parameters() , max_norm = 100 , norm_type = 2 )
             optimizer.step()
             t1 = time.time()
             losses += loss.item()
-            # del loss
-            # torch.cuda.empty_cache()  # 释放未使用的缓存内存
+            del loss
+            torch.cuda.empty_cache()  # 释放未使用的缓存内存
 
             if iteration % 100 == 0:
                 tloss = losses / (batch_idx + 1)
@@ -258,9 +257,8 @@ def train():
                                os.path.join(save_folder, file))
             iteration += 1
             # 在每个 batch 结束后添加以下代码
-            del images , targets , img_dark , out , loss_l_pa1l , loss_c_pal1 , loss_l_pa12 , loss_c_pal2 , loss_mutual
+            del images , targets , img_dark , out , loss_l_pa1l , loss_c_pal1 , loss_l_pa12 , loss_c_pal2 #, loss_mutual
             torch.cuda.empty_cache()
-            val( epoch , net , dsfd_net , criterion )
 
         if (epoch + 1) >= 0:
             val(epoch, net, dsfd_net, criterion)
@@ -287,11 +285,11 @@ def val(epoch, net, dsfd_net, criterion):
                 targets = [ann for ann in targets]
         img_dark = torch.stack([Low_Illumination_Degrading(images[i])[0] for i in range(images.shape[0])],
                                dim=0)
-        out, loss_mutual = net.module.test_forward(x_dark=img_dark, x_light=images)
+        out= net.module.test_forward(x_dark=img_dark)#, x_light=images)
 
         loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
         loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)
-        loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
+        loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2
 
         losses += loss.item()
         step += 1
