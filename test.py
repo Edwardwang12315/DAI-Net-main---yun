@@ -51,8 +51,9 @@ def to_chw_bgr(image):
     return image
 
 def detect_face(img, tmp_shrink):
-    image = cv2.resize(img, None, None, fx=tmp_shrink,
-                       fy=tmp_shrink, interpolation=cv2.INTER_LINEAR)
+    # image = cv2.resize(img, None, None, fx=tmp_shrink,
+    #                    fy=tmp_shrink, interpolation=cv2.INTER_LINEAR)
+    image = cv2.resize( img , (1024,720) , None , interpolation = cv2.INTER_LINEAR )
 
     x = to_chw_bgr(image)
     x = x.astype('float32')
@@ -64,12 +65,25 @@ def detect_face(img, tmp_shrink):
     if use_cuda:
         x = x.cuda()
 
-    y = net.test_forward(x)[0]
+    y,_ = net.test_forward(x)[0]
     detections = y.data.cpu().numpy()
+    # 调整维度顺序 [C, H, W] → [H, W, C]
+    # image = np.transpose( image , (1 , 2 , 0) )
+
+    # # 转换为 0~255 的 uint8 类型
+    # image = (image * 255).astype( np.uint8 )
+    #
+    # # 显示图像
+    # print("错误位置")
+    # plt.imshow( image )
+    # plt.axis( 'off' )
+    # plt.show()
+    # exit()
     scale = np.array([img.shape[1], img.shape[0], img.shape[1], img.shape[0]])
 
     boxes=[]
     scores = []
+
     for i in range(detections.shape[1]):
       j = 0
       while ((j < detections.shape[2]) and detections[0, i, j, 0] > 0.0):
@@ -208,7 +222,7 @@ def load_models():
     print('build network')
     net = build_net('test', num_classes=2, model='dark')
     net.eval()
-    net.load_state_dict(torch.load('./weights/DarkFaceZSDA.pth')) # Set the dir of your model weight
+    net.load_state_dict(torch.load('./weights/dsfd.pth')) # Set the dir of your model weight
 
     if use_cuda:
         net = net.cuda()
@@ -243,7 +257,7 @@ if __name__ == '__main__':
     save_path = './result'
 
     def load_images():
-      imglist = glob.glob('./dataset/DarkFace/images/*.png') # Set the dir of your test data
+      imglist = glob.glob('./1.png') # Set the dir of your test data
       return imglist
 
     ''' Main Test '''
