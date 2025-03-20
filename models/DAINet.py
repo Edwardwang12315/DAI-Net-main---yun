@@ -11,11 +11,15 @@ import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
 from torch.autograd import Variable , Function
+from torchvision import transforms
 
 from layers import *
 from data.config import cfg
 import cv2
 import inspect
+
+import numpy as np
+import matplotlib.pyplot as plt
 
 
 class Interpolate( nn.Module ) :
@@ -60,255 +64,265 @@ class FEM( nn.Module ) :
 
 # 仿射变换
 class SFT_layer( nn.Module ) :
-	def __init__( self , weight_init,in_ch = 3 , inter_ch = 32 , out_ch = 3 , kernel_size = 3) :
+	def __init__( self , weight_init , in_ch = 3 , inter_ch = 32 , out_ch = 3 , kernel_size = 3 ) :
 		super().__init__()
 		self.encoder = nn.Sequential( nn.Conv2d( in_ch , inter_ch , kernel_size , padding = kernel_size // 2 ) ,
-				nn.LeakyReLU( True ) , )
+		                              nn.Sigmoid(  ) , )
 		self.decoder = nn.Sequential( nn.Conv2d( inter_ch , out_ch , kernel_size , padding = kernel_size // 2 ) )
 		self.shift_conv = nn.Sequential( nn.Conv2d( in_ch , inter_ch , kernel_size , padding = kernel_size // 2 ) )
 		self.scale_conv = nn.Sequential( nn.Conv2d( in_ch , inter_ch , kernel_size , padding = kernel_size // 2 ) )
 
-		self.encoder.apply( weight_init)
-		self.decoder.apply( weight_init)
-		self.shift_conv.apply( weight_init)
-		self.scale_conv.apply( weight_init)
+		self.encoder.apply( weight_init )
+		self.decoder.apply( weight_init )
+		self.shift_conv.apply( weight_init )
+		self.scale_conv.apply( weight_init )
 
 	def forward( self , x , guide ) :
 		x = self.encoder( x )
 		scale = self.scale_conv( guide )
 		shift = self.shift_conv( guide )
-		x += (x * scale + shift)
+		# with torch.no_grad() :
+		x =x+ (x * scale + shift)
 		x = self.decoder( x )
 
-		del scale , shift
-		torch.cuda.empty_cache()
 		return x
 
 
 # DEM
 class Trans_high( nn.Module ) :
-	def __init__( self ,weight_init, in_ch = 3 , inter_ch = 32 , out_ch = 3 , kernel_size = 3 ) :
+	def __init__( self , weight_init , in_ch = 3 , inter_ch = 32 , out_ch = 3 , kernel_size = 3 ) :
 		super().__init__()
 
-		self.sft = SFT_layer( weight_init = weight_init,in_ch=in_ch , inter_ch=inter_ch ,out_ch= out_ch , kernel_size = kernel_size )
+		self.sft = SFT_layer( weight_init = weight_init , in_ch = in_ch , inter_ch = inter_ch , out_ch = out_ch ,
+		                      kernel_size = kernel_size )
 
 	def forward( self , x , guide ) :
-		out=x + self.sft( x , guide )
+		out = x + self.sft( x , guide )
 
-		del x,guide
-		torch.cuda.empty_cache()
 		return out
 
 
 # 上采样
 class Up_guide( nn.Module ) :
-	def __init__( self ,weight_init, kernel_size = 1 , ch = 3 ) :
+	def __init__( self , weight_init , kernel_size = 1 , ch = 3 ) :
 		super().__init__()
 		self.up = nn.Sequential( nn.Upsample( scale_factor = 2 , mode = "bilinear" , align_corners = True ) ,
-				# 这里的卷积文章中并没有提到，AI认为可以确保引导信息与高频分量的特征在空间和语义上对齐，我持怀疑态度
-				nn.Conv2d( ch , ch , kernel_size , stride = 1 , padding = kernel_size // 2  ) )
+		                         # 这里的卷积文章中并没有提到，AI认为可以确保引导信息与高频分量的特征在空间和语义上对齐，我持怀疑态度
+		                         nn.Conv2d( ch , ch , kernel_size , stride = 1 , padding = kernel_size // 2 ) )
 
-		self.up.apply( weight_init)
+		self.up.apply( weight_init )
+
 	def forward( self , x ) :
-		x = self.up( x )
 
-		return x
+		return self.up( x )
 
 
 # 拉普拉斯金字塔
-class Lap_Pyramid_Conv( nn.Module ) :
+class Lap_Pyramid_Conv() :
 	def __init__( self , num_high = 3 , kernel_size = 5 , channels = 3 ) :
 		super().__init__()
 
 		self.num_high = num_high
 		self.kernel = self.gauss_kernel( kernel_size , channels )
+		self.transform=transforms.ToPILImage()
 
 	def gauss_kernel( self , kernel_size , channels ) :
-		with torch.no_grad() :
-			kernel = cv2.getGaussianKernel( kernel_size , 0 ).dot( cv2.getGaussianKernel( kernel_size , 0 ).T )
-			kernel = torch.FloatTensor( kernel ).unsqueeze( 0 ).repeat( channels , 1 , 1 , 1 )
-			kernel = torch.nn.Parameter( data = kernel , requires_grad = False )
+		kernel = cv2.getGaussianKernel( kernel_size , 0 ).dot( cv2.getGaussianKernel( kernel_size , 0 ).T )
+		kernel = torch.FloatTensor( kernel ).unsqueeze( 0 ).repeat( channels , 1 , 1 , 1 )
+		kernel = torch.nn.Parameter( data = kernel , requires_grad = False )
 		return kernel
 
 	def conv_gauss( self , x , kernel ) :
-		with torch.no_grad() :
-			n_channels , _ , kw , kh = kernel.shape
-			x = torch.nn.functional.pad( x , (kw // 2 , kh // 2 , kw // 2 , kh // 2) ,
-			                             mode = 'reflect' )  # replicate    # reflect
-			x = torch.nn.functional.conv2d( x , kernel , groups = n_channels )
+		n_channels , _ , kw , kh = kernel.shape
+		x = torch.nn.functional.pad( x , (kw // 2 , kh // 2 , kw // 2 , kh // 2) ,
+		                             mode = 'reflect' )  # replicate    # reflect
+		x = torch.nn.functional.conv2d( x , kernel , groups = n_channels )
 
-		del n_channels, _ , kw , kh,kernel
-		torch.cuda.empty_cache()
 		return x
 
 	def downsample( self , x ) :
 		return x[ : , : , : :2 , : :2 ]
 
 	def pyramid_down( self , x ) :
-		out=self.downsample( self.conv_gauss( x , self.kernel ) )
+		out = self.downsample( self.conv_gauss( x , self.kernel ) )
 
-		del x
-		torch.cuda.empty_cache()
 		return out
 
 	def upsample( self , x ) :
-		with torch.no_grad():
-			up = torch.zeros( (x.size( 0 ) , x.size( 1 ) , x.size( 2 ) * 2 , x.size( 3 ) * 2) , device = x.device )
-			up[ : , : , : :2 , : :2 ] = (x * 4)
-			out=self.conv_gauss( up , self.kernel )
+		up = torch.zeros( (x.size( 0 ) , x.size( 1 ) , x.size( 2 ) * 2 , x.size( 3 ) * 2) , device = x.device )
+		up[ : , : , : :2 , : :2 ] = (x * 4)
+		out = self.conv_gauss( up , self.kernel )
 
-		del up
-		torch.cuda.empty_cache()
 		return out
 
 	def pyramid_decom( self , img ) :
-		with torch.no_grad():
-			self.kernel = self.kernel.to( img.device )
-			current = img
-			pyr = [ ]
-			for _ in range( self.num_high ) :
-				down = self.pyramid_down( current )
-				up = self.upsample( down )
-				diff = current - up
-				pyr.append( diff )
-				current = down
+		self.kernel = self.kernel.to( img.device )
+		current = img
+		pyr = [ ]
+		for i in range( self.num_high ) :
+			down = self.pyramid_down( current )
+			up = self.upsample( down )
+			diff = current - up
+			pyr.append( diff )
+			current = down
 
-			pyr.append( current )#HF1 HF2 HF3 HF4 LF
-			# 删除中间变量
-			del down , up , diff , current
-			torch.cuda.empty_cache()
-			return pyr
+			# cut = self.transform( diff.squeeze( 0 ) )
+			# cut.save( f'level_{i}.png' )
+
+		pyr.append( current )  # HF1 HF2 HF3 HF4 LF
+
+		# cut = self.transform( current.squeeze(0) )
+		# cut.save( f'level_{self.num_high}.png' )
+
+		return pyr
 
 	def pyramid_recons( self , pyr ) :
-		with torch.no_grad():
-			image = pyr[ 0 ]
-			for level in pyr[ 1 : ] :
-				up = self.upsample( image )
-				image = up + level
+		# with torch.no_grad() :
+		image = pyr[ 0 ]
+		# for level in pyr[ 1 : ] :
+		for i in range( len( pyr ) - 1 ) :
+			level = pyr[ 1+i ]
+			up = self.upsample( image )
+			image = up + level
 
-			del up,level
-			torch.cuda.empty_cache()
+			# recon = self.transform( image.squeeze( 0 ) )
+			# recon.save( f'recon_level_{len( pyr ) - 1 - i}.png' )
+		# exit()
+		
 		return image
 
 
 # CGM
 class Trans_guide( nn.Module ) :
 	# 这里和论文中所说的通道为32有出入
-	def __init__( self ,weight_init, ch = 16 ) :
+	def __init__( self , weight_init , ch = 16 ) :
 		super().__init__()
-		self.layer1 = nn.Sequential( nn.Conv2d( 6 , ch , 3 , padding = 1 ) , nn.LeakyReLU( True ) )
-		self.layer=nn.Sequential(self.layer1,SpatialAttention_plusx(weight_init = weight_init, kernel_size = 3 ) , nn.Conv2d( ch , 3 , 3 , padding = 1 ) , )
+		self.layer = nn.Sequential( nn.Conv2d( 6 , ch , 3 , padding = 1 ) , nn.LeakyReLU( True ) ,
+		                            SpatialAttention_plusx( weight_init = weight_init , kernel_size = 3 ) ,
+		                            nn.Conv2d( ch , 3 , 3 , padding = 1 ) , )
 
-		self.layer1.apply( weight_init)
+		self.layer.apply( weight_init )
+
 	def forward( self , x ) :
-		out=self.layer( x )
+		out = self.layer( x )
 
-		del x
-		torch.cuda.empty_cache()
 		return out
 
 
 # L通道
 class Trans_low( nn.Module ) :
-	def __init__( self , weight_init , ch_blocks = 64 , ch_mask = 16) :
+	def __init__( self , weight_init , ch_blocks = 64 , ch_mask = 16 ) :
 		super().__init__()
 
 		self.encoder = nn.Sequential( nn.Conv2d( 3 , 16 , 3 , padding = 1 ) , nn.LeakyReLU( True ) ,
 		                              nn.Conv2d( 16 , ch_blocks , 3 , padding = 1 ) , nn.LeakyReLU( True ) )
 
-		self.mm1 = nn.Sequential(nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 1 , padding = 0 ))
-		self.mm2 = nn.Sequential(nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 3 , padding = 3 // 2 ))
-		self.mm3 = nn.Sequential(nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 5 , padding = 5 // 2 ))
-		self.mm4 = nn.Sequential(nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 7 , padding = 7 // 2 ))
+		self.mm1 = nn.Sequential( nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 1 , padding = 0 ) )
+		self.mm2 = nn.Sequential( nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 3 , padding = 3 // 2 ) )
+		self.mm3 = nn.Sequential( nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 5 , padding = 5 // 2 ) )
+		self.mm4 = nn.Sequential( nn.Conv2d( ch_blocks , ch_blocks // 4 , kernel_size = 7 , padding = 7 // 2 ) )
 
 		self.decoder = nn.Sequential( nn.Conv2d( ch_blocks , 16 , 3 , padding = 1 ) , nn.LeakyReLU( True ) ,
 		                              nn.Conv2d( 16 , 3 , 3 , padding = 1 ) )
 
-		self.trans_guide = Trans_guide(weight_init= weight_init ,ch=ch_mask)
+		self.trans_guide = Trans_guide( weight_init = weight_init , ch = ch_mask )
 
-		self.encoder.apply( weight_init)
-		self.decoder.apply( weight_init)
-		self.mm1.apply( weight_init)
-		self.mm2.apply( weight_init)
-		self.mm3.apply( weight_init)
-		self.mm4.apply( weight_init)
+		self.encoder.apply( weight_init )
+		self.decoder.apply( weight_init )
+		self.mm1.apply( weight_init )
+		self.mm2.apply( weight_init )
+		self.mm3.apply( weight_init )
+		self.mm4.apply( weight_init )
 
 	def forward( self , x ) :
-
 		x1 = self.encoder( x )  # 这里是不是应该对应mm1-4
 		x1_1 = self.mm1( x1 )
 		x1_2 = self.mm2( x1 )
 		x1_3 = self.mm3( x1 )
 		x1_4 = self.mm4( x1 )
+
 		x1 = torch.cat( [ x1_1 , x1_2 , x1_3 , x1_4 ] , dim = 1 )
 		x1 = self.decoder( x1 )
 
+		# with torch.no_grad() :
 		out = (x + x1)
 		out = torch.relu( out )  # 当前通道输出
 
 		mask = self.trans_guide( torch.cat( [ x , out ] , dim = 1 ) )  # 输出给high-layer
 
-		del x1,x1_1,x1_2,x1_3,x1_4,x
-		torch.cuda.empty_cache()
 		return out , mask
 
 
-class DownAttention_onlyA(nn.Module):
-	def __init__(self,weight_init, kernel_size=7):
+class illumination_global( nn.Module ) :
+	def __init__( self , weight_init , kernel_size = 7 ) :
 		super().__init__()
 		# assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
 		padding = 3 if kernel_size == 7 else 1
-		self.downsample = nn.Sequential(nn.Conv2d(3, 3, kernel_size, padding=padding, stride = 2),nn.ReLU( True ) ,)
-		self.conv = nn.Sequential(nn.Conv2d(2, 1, kernel_size, padding=padding))
-		self.sigmoid = nn.Sequential(nn.Sigmoid())
+		self.downsample = nn.Sequential( nn.Conv2d( 3 , 3 , kernel_size , padding = padding , stride = 2 ) ,
+		                                 nn.ReLU( True ) , )
+		self.encoder = nn.Sequential( nn.Conv2d( 3 , 3 , kernel_size , padding = padding ) , nn.ReLU( True ) ,
+		                                   nn.Conv2d(3,32,kernel_size,padding=padding),nn.LeakyReLU(True))
 
-		self.downsample.apply( weight_init)
-		self.conv.apply( weight_init)
-	def forward(self,x,level):
-		for i in range( level ) :# LF HF4 HF3 HF2 HF1 0 1 2 3
-			x=self.downsample(x)
-		with torch.no_grad():
-			# 1*h*w
-			avg_out = torch.mean( x , dim = 1 , keepdim = True )
-			# print('avg_out=',avg_out.shape)
-			max_out , _ = torch.max( x , dim = 1 , keepdim = True )
-			# print('max_out=',max_out.shape)
-			attention = torch.cat( [ avg_out , max_out ] , dim = 1 )
-			# print('attention=',attention.shape)
-		# 2*h*w
-		attention = self.conv( attention )
+		self.shift_conv = nn.Sequential( nn.Conv2d( 3 , 32 , kernel_size , padding = kernel_size // 2 ) )
+		self.scale_conv = nn.Sequential( nn.Conv2d( 3 , 32 , kernel_size , padding = kernel_size // 2 ) )
+		self.decoder = nn.Sequential( nn.Conv2d( 32 , 3 , kernel_size , padding = kernel_size // 2 ) )
 
-		# 1*h*w
-		out=self.sigmoid( attention )
+		self.downsample.apply( weight_init )
+		self.encoder.apply( weight_init )
+		self.shift_conv.apply( weight_init )
+		self.scale_conv.apply( weight_init )
+		self.decoder.apply( weight_init )
 
-		del avg_out,max_out,x,level,attention
-		torch.cuda.empty_cache()
+	def forward( self , img , LF,level ) :
+		# 下采样
+		for i in range( level ) :  # LF HF3 HF2 HF1 0 1 2 3
+			img = self.downsample( img )
+		# 提取光照特征
+		scale=self.encoder(LF)
+		scale=self.decoder(scale)
+		LF=LF*scale+LF
+
+		return LF
+
+class down_finetune( nn.Module):
+	def __init__(self,weight_init,kernel_size=3,channels=3):
+		super().__init__()
+		self.conv=nn.Sequential(nn.Conv2d(2,1,kernel_size,padding=1),nn.Sigmoid())
+		self.downsample=nn.Sequential(nn.Conv2d(channels,channels,kernel_size,padding=1,stride = 2),nn.Sigmoid())
+
+		self.conv.apply(weight_init)
+		self.downsample.apply(weight_init)
+
+	def forward( self ,HF,level,LF):
+		avg_out = torch.mean( HF , dim = 1 , keepdim = True )
+		max_out , _ = torch.max( HF , dim = 1 , keepdim = True )
+		attention = torch.cat( [ avg_out , max_out ] , dim = 1 )
+
+		HF = (self.conv( attention ) * HF)+HF
+		for i in range( level ) :  # LF HF3 HF2 HF1 0 1 2 3
+			HF = self.downsample( HF )
+		out=LF+HF
+
 		return out
 
-class SpatialAttention_plusx(nn.Module):
-	def __init__(self,weight_init, kernel_size=7):
+class SpatialAttention_plusx( nn.Module ) :
+	def __init__( self , weight_init , kernel_size = 7 ) :
 		super().__init__()
 		# assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
 		padding = 3 if kernel_size == 7 else 1
-		self.conv = nn.Sequential(nn.Conv2d(2, 1, kernel_size, padding=padding))
-		self.sigmoid = nn.Sequential(nn.Sigmoid())
+		self.conv = nn.Sequential( nn.Conv2d( 2 , 1 , kernel_size , padding = padding ) ,nn.Sigmoid() )
 
-		self.conv.apply( weight_init)
-	def forward(self,x):
-		with torch.no_grad():
-			# 1*h*w
-			avg_out = torch.mean( x , dim = 1 , keepdim = True )
-			# print('avg_out=',avg_out.shape)
-			max_out , _ = torch.max( x , dim = 1 , keepdim = True )
-			# print('max_out=',max_out.shape)
-			attention = torch.cat( [ avg_out , max_out ] , dim = 1 )
-		# 2*h*w
-		attention = self.conv( attention )
+		self.conv.apply( weight_init )
+
+	def forward( self , x ) :
 		# 1*h*w
-		out=(self.sigmoid( attention )*x)
-
-		del avg_out,max_out,x,attention
+		avg_out = torch.mean( x , dim = 1 , keepdim = True )
+		max_out , _ = torch.max( x , dim = 1 , keepdim = True )
+		attention = torch.cat( [ avg_out , max_out ] , dim = 1 )
+		# 1*h*w
+		out = (self.conv( attention ) * x)
 		return out
+
 
 class DSFD( nn.Module ) :
 	"""Single Shot Multibox Architecture
@@ -355,26 +369,22 @@ class DSFD( nn.Module ) :
 		self.conf_pal2 = nn.ModuleList( head2[ 1 ] )
 
 		self.num_high = 3
-		self.lap_pyramid = Lap_Pyramid_Conv( self.num_high , kernel_size = 5 )#不需要梯度
-		self.pipline_LF = Trans_low( weight_init = self.weights_init,ch_blocks = 32 , ch_mask = 32 )
-		self.illumination_global = DownAttention_onlyA( weight_init = self.weights_init,kernel_size = 3)
+		self.lap_pyramid = Lap_Pyramid_Conv( self.num_high , kernel_size = 5 )  # 不需要梯度
+		self.pipline_LF = Trans_low( weight_init = self.weights_init , ch_blocks = 32 , ch_mask = 32 )
+		self.illumination_global = illumination_global( weight_init = self.weights_init , kernel_size = 3 )
 		# 这里的setattr和后面的getattr是联动的
 		for i in range( 0 , self.num_high ) :
 			# LF向上传递
-			self.__setattr__( 'up_guide_layer_{}'.format( i ) , Up_guide( weight_init = self.weights_init,kernel_size = 1 , ch = 3 ) )
+			self.__setattr__( 'up_guide_layer_{}'.format( i ) ,
+			                  Up_guide( weight_init = self.weights_init , kernel_size = 1 , ch = 3 ) )
 			# HFs完整通路
 			self.__setattr__( 'pipline_HFs{}'.format( i ) ,
-			                  Trans_high( weight_init = self.weights_init,in_ch = 3 , inter_ch = 32 , out_ch = 3 , kernel_size = 3 ,) )
+			                  Trans_high( weight_init = self.weights_init , in_ch = 3 , inter_ch = 32 , out_ch = 3 ,
+			                              kernel_size = 3 , ) )
 			# HFs向下 细节增强
-			self.__setattr__( 'down_guide_attention{}'.format( i ) , DownAttention_onlyA( weight_init = self.weights_init,kernel_size = 3 ,) )
+			self.__setattr__( 'down_guide_attention{}'.format( i ) ,
+			                  down_finetune( weight_init = self.weights_init , kernel_size = 3 , ) )
 
-		# the reflectance decoding branch
-		# 反射图解码模块
-		self.ref = nn.Sequential( nn.Conv2d( 64 , 64 , kernel_size = 3 , padding = 1 ) , nn.ReLU( inplace = True ) ,
-		                          Interpolate( 2 ) ,  # 上采样
-		                          nn.Conv2d( 64 , 3 , kernel_size = 3 , padding = 1 ) , nn.Sigmoid() )
-		self.ref.apply(self.weights_init)
-		# 计算teacher模型和学生模型的KL散度
 		self.KL = DistillKL( T = 4.0 )
 
 		if self.phase == 'test' :
@@ -383,7 +393,7 @@ class DSFD( nn.Module ) :
 
 	def _upsample_prod( self , x , y ) :
 		_ , _ , H , W = y.size()
-		return F.upsample( x , size = (H , W) , mode = 'bilinear' ) * y
+		return F.interpolate( x , size = (H , W) , mode = 'bilinear' ) * y
 
 	# 反射图解码通路
 	def enh_forward( self , x ) :
@@ -396,7 +406,7 @@ class DSFD( nn.Module ) :
 
 		return R
 
-	def test_forward( self , x_dark , x_light ) :
+	def test_forward( self , x_dark):# , x_light ) :
 		with torch.no_grad() :
 			size = x_dark.size()[ 2 : ]
 			pal1_sources = list()
@@ -411,104 +421,73 @@ class DSFD( nn.Module ) :
 			# 主通路(暗图)
 			Lap_pyrs_dark = [ ]
 			commom_guide = [ ]
-
 			# 跨频率指导
-			LF, guide = self.pipline_LF( pyrs_dark[ -1 ] )  # LF通道的两个返回值
+			LF , guide = self.pipline_LF( pyrs_dark[ -1 ] )  # LF通道的两个返回值
 			Lap_pyrs_dark.append( LF )  # LF
-			del LF
 			# LF向上传递
 			for i in range( self.num_high ) :
 				guide = self.__getattr__( 'up_guide_layer_{}'.format( i ) )( guide )
 				commom_guide.append( guide )
-			del guide
 			# HFs完整通路
 			for i in range( self.num_high ) :
 				# 高频信号通路,从HF4开始
 				HFs = self.__getattr__( 'pipline_HFs{}'.format( i ) )( pyrs_dark[ -2 - i ] ,
 				                                                       commom_guide[ i ] )  # HF4 HF3 HF2 HF1
 				Lap_pyrs_dark.append( HFs )  # LF HF4 HF3 HF2 HF1
-			del pyrs_dark,HFs
-			# HFs向下 细节增强
-			for i in range( self.num_high ) :
-				# 从高频输出返回的重点信息位置
-				Lap_pyrs_dark[ 0 ] = Lap_pyrs_dark[ 0 ] * self.__getattr__( 'down_guide_attention{}'.format( i ) )( Lap_pyrs_dark[ -1 - i ] ,
-				                                                                         self.num_high - i )  # 得到LA位置注意力
-			# 全局亮度调整
-			Lap_pyrs_dark[ 0 ] = Lap_pyrs_dark[ 0 ] * self.illumination_global( x_dark , level=self.num_high)
+			# # 全局亮度调整
+			# Lap_pyrs_dark[ 0 ] = self.illumination_global( img = x_dark , LF = Lap_pyrs_dark[ 0 ] ,
+			# 	                                               level = self.num_high )
+			#
+			# # HFs向下 细节增强
+			# for i in range( self.num_high ) :
+			# 	# 从高频输出返回的重点信息位置
+			# 	Lap_pyrs_dark[ 0 ] = self.__getattr__( 'down_guide_attention{}'.format( i ) )(
+			# 			HF = Lap_pyrs_dark[ -1 - i ] , level = self.num_high - i ,
+			# 			LF = Lap_pyrs_dark[ 0 ] )  # 得到LA位置注意力
 
-			# 亮图通路
-			Lap_pyrs_light = [ ]
-			Lap_pyrs_region = [ ]
-			# 整理输出
-			pyrs_light = self.lap_pyramid.pyramid_decom( img = x_light )  # HF1 HF2 HF3 HF4 LF
-			for i in range( self.num_high ) :
-				Lap_pyrs_light.append( pyrs_light[ -1 - i ] )  # LF HF4 HF3 HF2 HF1
-			del pyrs_light
-			# 全局亮度调整
-			Lap_pyrs_region = Lap_pyrs_light
-			Lap_pyrs_light[ 0 ] = (Lap_pyrs_light[ 0 ] * self.illumination_global( x_light , level = self.num_high ))
+			# # 亮图通路
+			# Lap_pyrs_light = [ ]
+			# Lap_pyrs_region = [ ]
+			# # 整理输出
+			# pyrs_light = self.lap_pyramid.pyramid_decom( img = x_light )  # HF1 HF2 HF3 HF4 LF
+			# for i in range( self.num_high ) :
+			# 	Lap_pyrs_light.append( pyrs_light[ -1 - i ] )  # LF HF4 HF3 HF2 HF1
+			# # 全局亮度调整
+			# Lap_pyrs_region = Lap_pyrs_light
+			# Lap_pyrs_light[ 0 ] = self.illumination_global( img = x_light , LF = Lap_pyrs_light[ 0 ] ,
+			#                                                 level = self.num_high )
+			#
+			# # 不同来源 图像重建
+			# # 照明调整 Lap:LF HF4 HF3 HF2 HF1
+			# Lap_illum = Lap_pyrs_dark
+			# Lap_region = Lap_pyrs_dark
+			# Lap_highLvl = Lap_pyrs_light
+			# Lap_illum[ 0 ] = Lap_pyrs_light[ 0 ]  # HF_enhanc+LF_illum,证明根据亮度动态调整
+			# Lap_region[ 0 ] = Lap_pyrs_region[ 0 ]  # HF_enhanc+LF_region,证明暗图调整后接近源域亮度
+			# Lap_highLvl[ 0 ] = Lap_pyrs_dark[ 0 ]  # HF_region+LF_enhanc,证明暗图高频提取准确
 
-			# 不同来源 图像重建
-			# 照明调整 Lap:LF HF4 HF3 HF2 HF1
-			Lap_illum = Lap_pyrs_dark
-			Lap_region = Lap_pyrs_dark
-			Lap_highLvl = Lap_pyrs_light
-			Lap_illum[ 0 ] = Lap_pyrs_light[ 0 ]  # HF_enhanc+LF_illum,证明根据亮度动态调整
-			Lap_region[ 0 ] = Lap_pyrs_region[ 0 ]  # HF_enhanc+LF_region,证明暗图调整后接近源域亮度
-			Lap_highLvl[ 0 ] = Lap_pyrs_dark[ 0 ]  # HF_region+LF_enhanc,证明暗图高频提取准确
-			# 亮度调整
-			img_out = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
-			img_illum = self.lap_pyramid.pyramid_recons( Lap_illum )  # 证明暗图调整后接近源域亮度
-			img_region = self.lap_pyramid.pyramid_recons( Lap_region )  # 证明暗图高频提取准确
-			# 细节增强
-			img_highlvl = self.lap_pyramid.pyramid_recons( Lap_highLvl )  # 证明根据亮度动态调整
-			del Lap_illum , Lap_region , Lap_highLvl , Lap_pyrs_dark , Lap_pyrs_region , Lap_pyrs_light
-
+			x = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
 			# 检测通路特征提取
-			for k in range( 14 ) :
-				img_out = self.vgg[ k ]( img_out )
-				if k == 4 :
-					x_out = img_out
-			x = img_out
-
-			# 简单处理
-			for k in range( 5 ) :
-				img_illum = self.vgg[ k ]( img_illum )
-				img_region = self.vgg[ k ]( img_region )
-				img_highlvl = self.vgg[ k ]( img_highlvl )
-
-			x_illum = img_illum
-			x_region = img_region
-			x_highlvl = img_highlvl
-			del img_illum , img_region , img_highlvl
-
-			x_out = x_out.flatten( start_dim = 2 ).mean( dim = -1 )
-			x_illum = x_illum.flatten( start_dim = 2 ).mean( dim = -1 )
-			x_region = x_region.flatten( start_dim = 2 ).mean( dim = -1 )
-			x_highlvl = x_highlvl.flatten( start_dim = 2 ).mean( dim = -1 )
-			# 明暗图调整后亮度相同,亮图调整后亮度不变
-			loss_mutual = cfg.WEIGHT.MC * (
-					self.KL( x_out , x_illum ) + self.KL( x_illum , x_out ) + self.KL( x_region , x_illum ) + self.KL(
-					x_illum , x_region ) + self.KL( x_out , x_highlvl ) + self.KL( x_highlvl , x_out ))
-			del x_out , x_illum , x_region , x_highlvl
+			for k in range( 16 ) :# vgg13: 14 vgg16: 16
+				x = self.vgg[ k ]( x )
 
 			of1 = x
 			s = self.L2Normof1( of1 )
 			pal1_sources.append( s )
 			# apply vgg up to fc7
-			for k in range( 14 , 19 ) :
+			for k in range( 16,23 ) : # vgg13: 14,19 vgg16: 16,23
 				x = self.vgg[ k ]( x )
 			of2 = x
 			s = self.L2Normof2( of2 )
 			pal1_sources.append( s )
 
-			for k in range( 19 , 24 ) :
+			for k in range( 23,30) :  # vgg13: 19,24 vgg16: 23,30
 				x = self.vgg[ k ]( x )
 			of3 = x
 			s = self.L2Normof3( of3 )
 			pal1_sources.append( s )
 
-			for k in range( 24 , len( self.vgg ) ) :
+			for k in range( 30 , len( self.vgg ) ) :# vgg13: 24 vgg16: 30
 				x = self.vgg[ k ]( x )
 			of4 = x
 			pal1_sources.append( of4 )
@@ -572,12 +551,10 @@ class DSFD( nn.Module ) :
 			conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
 
 			priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
-			with torch.no_grad() :
-				self.priors_pal1 = priorbox.forward()
+			self.priors_pal1 = priorbox.forward()
 
 			priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
-			with torch.no_grad() :
-				self.priors_pal2 = priorbox.forward()
+			self.priors_pal2 = priorbox.forward()
 
 			if self.phase == 'test' :
 				output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
@@ -589,12 +566,8 @@ class DSFD( nn.Module ) :
 				          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
 				          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
 				          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
-			del ef1 , ef2 , ef3 , ef4 , ef5 , ef6 , conv3 , conv4 , conv5 , convfc7_2 , conv6 , conv7
-			del pal1_sources , pal2_sources , feat , priorbox , features_maps
-			del loc_pal1 , conf_pal1 , loc_pal2 , conf_pal2
-			del x , of1 , of2 , of3 , of4 , of5 , of6 , s
 
-		return output,loss_mutual
+		return output
 
 	# during training, the model takes the paired images, and their pseudo GT illumination maps from the Retinex Decom Net
 	def forward( self , x_dark , x_light ) :
@@ -607,114 +580,78 @@ class DSFD( nn.Module ) :
 		conf_pal2 = list()
 
 		# 金字塔分解
-		pyrs_dark = self.lap_pyramid.pyramid_decom( img = x_dark ) # HF1 HF2 HF3 HF4 LF
+		pyrs_dark = self.lap_pyramid.pyramid_decom( img = x_dark )  # HF1 HF2 HF3 LF
 
 		# 主通路(暗图)
 		Lap_pyrs_dark = [ ]
 		commom_guide = [ ]
 		# 跨频率指导
 		LF , guide = self.pipline_LF( pyrs_dark[ -1 ] )  # LF通道的两个返回值
-		Lap_pyrs_dark.append( LF ) # LF
-		del LF
-
+		Lap_pyrs_dark.append( LF )  # LF
 		# LF向上传递
 		for i in range( self.num_high ) :
 			guide = self.__getattr__( 'up_guide_layer_{}'.format( i ) )( guide )
 			commom_guide.append( guide )
-		del guide
-
 		# HFs完整通路
 		for i in range( self.num_high ) :
 			# 高频信号通路,从HF4开始
 			HFs = self.__getattr__( 'pipline_HFs{}'.format( i ) )( pyrs_dark[ -2 - i ] ,
 			                                                       commom_guide[ i ] )  # HF4 HF3 HF2 HF1
-			Lap_pyrs_dark.append( HFs ) # LF HF4 HF3 HF2 HF1
-		del pyrs_dark,HFs
+			Lap_pyrs_dark.append( HFs )  # LF HF3 HF2 HF1
+		# 全局亮度调整
+		Lap_pyrs_dark[ 0 ] = self.illumination_global(img= x_dark ,LF=Lap_pyrs_dark[ 0 ], level = self.num_high )
 
 		# HFs向下 细节增强
 		for i in range( self.num_high ) :
 			# 从高频输出返回的重点信息位置
-			Lap_pyrs_dark[ 0 ] = Lap_pyrs_dark[ 0 ] * self.__getattr__( 'down_guide_attention{}'.format( i ) )( Lap_pyrs_dark[ -1 - i ] ,
-			                                                                         self.num_high - i ) # 得到LA位置注意力
-		# 全局亮度调整
-		Lap_pyrs_dark[ 0 ] = Lap_pyrs_dark[ 0 ] * self.illumination_global( x_dark , level=self.num_high)
+			Lap_pyrs_dark[ 0 ]=self.__getattr__( 'down_guide_attention{}'.format( i ) )(
+					HF=Lap_pyrs_dark[ -1 - i ] , level=self.num_high - i ,LF=Lap_pyrs_dark[ 0 ])  # 得到LA位置注意力
 
 		# 亮图通路
 		Lap_pyrs_light = [ ]
-		Lap_pyrs_region = [ ]
+		# Lap_pyrs_region = [ ]
 		# 整理输出
-		with torch.no_grad() :
-			pyrs_light = self.lap_pyramid.pyramid_decom( img = x_light )  # HF1 HF2 HF3 HF4 LF
-			for i in range( self.num_high ) :
-				Lap_pyrs_light.append( pyrs_light[ -1 - i ] )  # LF HF4 HF3 HF2 HF1
-		del pyrs_light
+		pyrs_light = self.lap_pyramid.pyramid_decom( img = x_light )  # HF1 HF2 HF3 LF
+		for i in range( self.num_high+1 ) :#传递4个分频
+			Lap_pyrs_light.append( pyrs_light[ -1 - i ] )  # LF HF3 HF2 HF1
 
 		# 全局亮度调整
-		Lap_pyrs_region = Lap_pyrs_light
-		Lap_pyrs_light[ 0 ] = (Lap_pyrs_light[ 0] * self.illumination_global( x_light ,level=self.num_high))
+		# Lap_pyrs_region = Lap_pyrs_light
+		Lap_pyrs_light[ 0 ] = self.illumination_global(img= x_light ,LF=Lap_pyrs_light[ 0 ], level = self.num_high )
 
 		# 不同来源 图像重建
-		with torch.no_grad() :
-			# 照明调整 Lap:LF HF4 HF3 HF2 HF1
-			Lap_illum = Lap_pyrs_dark
-			Lap_region = Lap_pyrs_dark
-			Lap_highLvl = Lap_pyrs_light
-			Lap_illum[ 0 ] = Lap_pyrs_light[ 0 ]  # HF_enhanc+LF_illum,证明根据亮度动态调整
-			Lap_region[ 0 ] = Lap_pyrs_region[ 0 ]  # HF_enhanc+LF_region,证明暗图调整后接近源域亮度
-			Lap_highLvl[ 0 ] = Lap_pyrs_dark[ 0 ] # HF_region+LF_enhanc,证明暗图高频提取准确
-			# 亮度调整
-			x = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
-			img_illum = self.lap_pyramid.pyramid_recons( Lap_illum )  # 证明暗图调整后接近源域亮度
-			img_region = self.lap_pyramid.pyramid_recons( Lap_region )  # 证明暗图高频提取准确
-			# 细节增强
-			img_highlvl = self.lap_pyramid.pyramid_recons( Lap_highLvl )  # 证明根据亮度动态调整
-			del Lap_illum,Lap_region,Lap_highLvl,Lap_pyrs_dark,Lap_pyrs_region,Lap_pyrs_light
+		# 照明调整 Lap:LF HF3 HF2 HF1
+		HFs_dark = Lap_pyrs_dark[1:]
+		HFs_light = Lap_pyrs_light[1:]
+		loss_mutual = 0
+
+		for i in range( len(HFs_dark) ) :
+			HF_dark=HFs_dark[i].flatten( start_dim = 2 ).mean( dim = -1 )
+			HF_light=HFs_light[i].flatten( start_dim = 2 ).mean( dim = -1 )
+			loss_mutual = loss_mutual+cfg.WEIGHT.MC *( self.KL( HF_dark , HF_light ) + self.KL( HF_light , HF_dark ))
 
 		# 检测通路特征提取
-		for k in range( 14 ) :#vgg13: 14 vgg16: 16
+		x = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
+		for k in range( 16 ) :  # vgg13: 14 vgg16: 16
 			x = self.vgg[ k ]( x )
-			if k == 4 :
-				x_out = x
-		# 简单处理
-		for k in range( 5 ) :
-			# print(x_out.shape)
-			img_illum = self.vgg[ k ]( img_illum )
-			img_region = self.vgg[ k ]( img_region )
-			img_highlvl = self.vgg[ k ]( img_highlvl )
-
-		with torch.no_grad() :
-			x_illum = img_illum
-			x_region = img_region
-			x_highlvl = img_highlvl
-			del img_illum , img_region , img_highlvl
-
-			x_out = x_out.flatten( start_dim = 2 ).mean( dim = -1 )
-			x_illum = x_illum.flatten( start_dim = 2 ).mean( dim = -1 )
-			x_region = x_region.flatten( start_dim = 2 ).mean( dim = -1 )
-			x_highlvl = x_highlvl.flatten( start_dim = 2 ).mean( dim = -1 )
-			# 明暗图调整后亮度相同,亮图调整后亮度不变
-			loss_mutual = cfg.WEIGHT.MC * (
-						self.KL( x_out , x_illum ) + self.KL( x_illum , x_out ) + self.KL( x_region , x_illum ) + self.KL(
-						x_illum , x_region ) + self.KL( x_out , x_highlvl ) + self.KL( x_highlvl , x_out ))
-			del x_out,x_illum,x_region,x_highlvl
 
 		of1 = x  # 16个vgg后的输出
 		s = self.L2Normof1( of1 )
 		pal1_sources.append( s )
 		# apply vgg up to fc7
-		for k in range( 14 , 19 ) :#vgg13: 14,19 vgg16: 16,23
+		for k in range(16,23) :  # vgg13: 14,19 vgg16: 16,23
 			x = self.vgg[ k ]( x )
 		of2 = x
 		s = self.L2Normof2( of2 )
 		pal1_sources.append( s )
 
-		for k in range( 19 , 24 ) :#vgg13: 19,24 vgg16: 23,30
+		for k in range( 23,30) :  # vgg13: 19,24 vgg16: 23,30
 			x = self.vgg[ k ]( x )
 		of3 = x
 		s = self.L2Normof3( of3 )
 		pal1_sources.append( s )
 
-		for k in range( 24 , len( self.vgg ) ) :#vgg13: 24 vgg16: 30
+		for k in range( 30 , len( self.vgg ) ) :  # vgg13: 24 vgg16: 30
 			x = self.vgg[ k ]( x )
 		of4 = x
 		pal1_sources.append( of4 )
@@ -777,11 +714,9 @@ class DSFD( nn.Module ) :
 		conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
 
 		priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
-		with torch.no_grad() :
-			self.priors_pal1 =  priorbox.forward()
+		self.priors_pal1 = priorbox.forward().requires_grad_(False)
 		priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
-		with torch.no_grad() :
-			self.priors_pal2 = priorbox.forward()
+		self.priors_pal2 = priorbox.forward().requires_grad_(False)
 
 		if self.phase == 'test' :
 			output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
@@ -793,12 +728,6 @@ class DSFD( nn.Module ) :
 			          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
 			          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
 			          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
-
-		del ef1,ef2,ef3,ef4,ef5,ef6,conv3,conv4,conv5,convfc7_2,conv6,conv7
-		del pal1_sources , pal2_sources,feat,priorbox,features_maps
-		del loc_pal1,conf_pal1,loc_pal2,conf_pal2
-		del x , of1 , of2 , of3 , of4 , of5 , of6 , s
-		torch.cuda.empty_cache()
 
 		return output , loss_mutual
 
@@ -813,20 +742,20 @@ class DSFD( nn.Module ) :
 			print( 'Finished!' )
 		else :
 			print( 'Sorry only .pth and .pkl files supported.' )
-		del other,ext,mdata
+		del other , ext , mdata
 		torch.cuda.empty_cache()
 		return epoch
 
-	def xavier( self , param ) :
-		init.xavier_uniform( param )
+	def kaiming( self , param ) :
+		init.kaiming_uniform( param )
 
 	def weights_init( self , m ) :
 		if isinstance( m , nn.Conv2d ) :
-			self.xavier( m.weight.data )
+			self.kaiming( m.weight.data )
 			m.bias.data.zero_()
 
 		if isinstance( m , nn.ConvTranspose2d ) :
-			self.xavier( m.weight.data )
+			self.kaiming( m.weight.data )
 			if 'bias' in m.state_dict().keys() :
 				m.bias.data.zero_()
 
@@ -835,11 +764,12 @@ class DSFD( nn.Module ) :
 			m.bias.data.zero_()
 
 
-# vgg_cfg = [ 64 , 64 , 'M' , 128 , 128 , 'M' , 256 , 256 , 256 , 'C' , 512 , 512 , 512 , 'M' , 512 , 512 , 512 , 'M' ]
-vgg_cfg = [ 64 , 64 , 'M' , 128 , 128 , 'M' , 256 , 256 , 'C' , 512 , 512 , 'M' , 512 , 512 , 'M' ]
+vgg_cfg = [ 64 , 64 , 'M' , 128 , 128 , 'M' , 256 , 256 , 256 , 'C' , 512 , 512 , 512 , 'M' , 512 , 512 , 512 , 'M' ]
+# vgg_cfg = [ 64 , 64 , 'M' , 128 , 128 , 'M' , 256 , 256 , 'C' , 512 , 512 , 'M' , 512 , 512 , 'M' ]
 extras_cfg = [ 256 , 'S' , 512 , 128 , 'S' , 256 ]
 
 fem_cfg = [ 256 , 512 , 512 , 1024 , 512 , 256 ]
+
 
 def fem_module( cfg ) :
 	topdown_layers = [ ]
@@ -855,6 +785,7 @@ def fem_module( cfg ) :
 			topdown_layers += [ nn.Conv2d( cur_channel , last_channel , kernel_size = 1 , stride = 1 , padding = 0 ) ]
 			lat_layers += [ nn.Conv2d( last_channel , last_channel , kernel_size = 1 , stride = 1 , padding = 0 ) ]
 	return (topdown_layers , lat_layers , fem_layers)
+
 
 def vgg( cfg , i , batch_norm = False ) :
 	layers = [ ]
@@ -876,6 +807,7 @@ def vgg( cfg , i , batch_norm = False ) :
 	layers += [ conv6 , nn.ReLU( inplace = True ) , conv7 , nn.ReLU( inplace = True ) ]
 	return layers
 
+
 def add_extras( cfg , i , batch_norm = False ) :
 	# Extra layers added to VGG for feature scaling
 	layers = [ ]
@@ -892,10 +824,11 @@ def add_extras( cfg , i , batch_norm = False ) :
 		in_channels = v
 	return layers
 
+
 def multibox( vgg , extra_layers , num_classes ) :
 	loc_layers = [ ]
 	conf_layers = [ ]
-	vgg_source = [ 12 , 17 , 22 , -2 ]#vgg13: [ 12 , 17 , 22 , -2 ] vgg16: [14, 21, 28, -2]
+	vgg_source = [14, 21, 28, -2]  # vgg13: [ 12 , 17 , 22 , -2 ] vgg16: [14, 21, 28, -2]
 
 	for k , v in enumerate( vgg_source ) :
 		# print(v)
@@ -905,6 +838,7 @@ def multibox( vgg , extra_layers , num_classes ) :
 		loc_layers += [ nn.Conv2d( v.out_channels , 4 , kernel_size = 3 , padding = 1 ) ]
 		conf_layers += [ nn.Conv2d( v.out_channels , num_classes , kernel_size = 3 , padding = 1 ) ]
 	return (loc_layers , conf_layers)
+
 
 def build_net_dark( phase , num_classes = 2 ) :
 	base = vgg( vgg_cfg , 3 )
