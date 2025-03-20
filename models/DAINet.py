@@ -72,10 +72,10 @@ class SFT_layer( nn.Module ) :
 		self.shift_conv = nn.Sequential( nn.Conv2d( in_ch , inter_ch , kernel_size , padding = kernel_size // 2 ) )
 		self.scale_conv = nn.Sequential( nn.Conv2d( in_ch , inter_ch , kernel_size , padding = kernel_size // 2 ) )
 
-		self.encoder.apply( weight_init )
-		self.decoder.apply( weight_init )
-		self.shift_conv.apply( weight_init )
-		self.scale_conv.apply( weight_init )
+		# self.encoder.apply( weight_init )
+		# self.decoder.apply( weight_init )
+		# self.shift_conv.apply( weight_init )
+		# self.scale_conv.apply( weight_init )
 
 	def forward( self , x , guide ) :
 		x = self.encoder( x )
@@ -110,7 +110,7 @@ class Up_guide( nn.Module ) :
 		                         # 这里的卷积文章中并没有提到，AI认为可以确保引导信息与高频分量的特征在空间和语义上对齐，我持怀疑态度
 		                         nn.Conv2d( ch , ch , kernel_size , stride = 1 , padding = kernel_size // 2 ) )
 
-		self.up.apply( weight_init )
+		# self.up.apply( weight_init )
 
 	def forward( self , x ) :
 
@@ -201,7 +201,7 @@ class Trans_guide( nn.Module ) :
 		                            SpatialAttention_plusx( weight_init = weight_init , kernel_size = 3 ) ,
 		                            nn.Conv2d( ch , 3 , 3 , padding = 1 ) , )
 
-		self.layer.apply( weight_init )
+		# self.layer.apply( weight_init )
 
 	def forward( self , x ) :
 		out = self.layer( x )
@@ -227,12 +227,12 @@ class Trans_low( nn.Module ) :
 
 		self.trans_guide = Trans_guide( weight_init = weight_init , ch = ch_mask )
 
-		self.encoder.apply( weight_init )
-		self.decoder.apply( weight_init )
-		self.mm1.apply( weight_init )
-		self.mm2.apply( weight_init )
-		self.mm3.apply( weight_init )
-		self.mm4.apply( weight_init )
+		# self.encoder.apply( weight_init )
+		# self.decoder.apply( weight_init )
+		# self.mm1.apply( weight_init )
+		# self.mm2.apply( weight_init )
+		# self.mm3.apply( weight_init )
+		# self.mm4.apply( weight_init )
 
 	def forward( self , x ) :
 		x1 = self.encoder( x )  # 这里是不是应该对应mm1-4
@@ -267,11 +267,11 @@ class illumination_global( nn.Module ) :
 		self.scale_conv = nn.Sequential( nn.Conv2d( 3 , 32 , kernel_size , padding = kernel_size // 2 ) )
 		self.decoder = nn.Sequential( nn.Conv2d( 32 , 3 , kernel_size , padding = kernel_size // 2 ) )
 
-		self.downsample.apply( weight_init )
-		self.encoder.apply( weight_init )
-		self.shift_conv.apply( weight_init )
-		self.scale_conv.apply( weight_init )
-		self.decoder.apply( weight_init )
+		# self.downsample.apply( weight_init )
+		# self.encoder.apply( weight_init )
+		# self.shift_conv.apply( weight_init )
+		# self.scale_conv.apply( weight_init )
+		# self.decoder.apply( weight_init )
 
 	def forward( self , img , LF,level ) :
 		# 下采样
@@ -290,8 +290,8 @@ class down_finetune( nn.Module):
 		self.conv=nn.Sequential(nn.Conv2d(2,1,kernel_size,padding=1),nn.Sigmoid())
 		self.downsample=nn.Sequential(nn.Conv2d(channels,channels,kernel_size,padding=1,stride = 2),nn.Sigmoid())
 
-		self.conv.apply(weight_init)
-		self.downsample.apply(weight_init)
+		# self.conv.apply(weight_init)
+		# self.downsample.apply(weight_init)
 
 	def forward( self ,HF,level,LF):
 		avg_out = torch.mean( HF , dim = 1 , keepdim = True )
@@ -312,7 +312,7 @@ class SpatialAttention_plusx( nn.Module ) :
 		padding = 3 if kernel_size == 7 else 1
 		self.conv = nn.Sequential( nn.Conv2d( 2 , 1 , kernel_size , padding = padding ) ,nn.Sigmoid() )
 
-		self.conv.apply( weight_init )
+		# self.conv.apply( weight_init )
 
 	def forward( self , x ) :
 		# 1*h*w
