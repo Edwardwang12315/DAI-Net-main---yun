@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--batch_size',
-                    default=10, type=int,
+                    default=2, type=int,
                     help='Batch size for training')
 parser.add_argument('--model',
                     default='dark', type=str,
@@ -201,7 +201,7 @@ def train():
     corr_mat = None
     for epoch in range(start_epoch, cfg.EPOCHES):
         losses = 0
-        print(f"###epoch{epoch} is working")
+        # print(f"###epoch{epoch} is working")
         for batch_idx, (images, targets, _) in enumerate(train_loader):
 
             images = images.cuda() / 255.
@@ -263,9 +263,7 @@ def train():
         if (epoch + 1) >= 0:
             val(epoch, net, dsfd_net, criterion)
         if iteration >= cfg.MAX_STEPS:
-            print( f"File: {__file__}, Line: {inspect.currentframe().f_lineno}" )
             break
-        print( f"File: {__file__}, Line: {inspect.currentframe().f_lineno}" )
 
 def val(epoch, net, dsfd_net, criterion):
     net.eval()
