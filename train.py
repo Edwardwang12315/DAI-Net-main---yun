@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--batch_size',
-                    default=12, type=int,
+                    default=16, type=int,
                     help='Batch size for training')
 parser.add_argument('--model',
                     default='dark', type=str,
@@ -46,7 +46,7 @@ parser.add_argument('--cuda',
                     default=True, type=bool,
                     help='Use CUDA to train model')
 parser.add_argument('--lr', '--learning-rate',
-                    default=3e-4, type=float,
+                    default=3e-3, type=float,
                     help='initial learning rate')
 parser.add_argument('--momentum',
                     default=0.9, type=float,
@@ -218,12 +218,13 @@ def train():
 
             # 前向传播两个分支
             t0 = time.time()
-            out,loss_mutual = net(x_dark=img_dark, x_light=images)
+            # out,loss_mutual = net(x_dark=img_dark, x_light=images)
+            loss = net( x_dark = img_dark , x_light = images )
 
             # 损失函数整理
-            loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targetss)
-            loss_l_pa12, loss_c_pal2 = criterion(out[3:], targetss)
-            loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
+            # loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targetss)
+            # loss_l_pa12, loss_c_pal2 = criterion(out[3:], targetss)
+            # loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
             # loss=loss_mutual
 
             loss.backward()
@@ -242,11 +243,11 @@ def train():
                     print('Timer: %.4f' % (t1 - t0))
                     print('epoch:' + repr(epoch) + ' || iter:' +
                           repr(iteration) + ' || Loss:%.4f' % (tloss))
-                    print('->> pal1 conf loss:{:.4f} || pal1 loc loss:{:.4f}'.format(
-                        loss_c_pal1.item(), loss_l_pa1l.item()))
-                    print('->> pal2 conf loss:{:.4f} || pal2 loc loss:{:.4f}'.format(
-                        loss_c_pal2.item(), loss_l_pa12.item()))
-                    print('->> mutual loss:{:.4f}'.format(loss_mutual.item()))
+                    # print('->> pal1 conf loss:{:.4f} || pal1 loc loss:{:.4f}'.format(
+                    #     loss_c_pal1.item(), loss_l_pa1l.item()))
+                    # print('->> pal2 conf loss:{:.4f} || pal2 loc loss:{:.4f}'.format(
+                    #     loss_c_pal2.item(), loss_l_pa12.item()))
+                    # print('->> mutual loss:{:.4f}'.format(loss_mutual.item()))
                     print('->>lr:{}'.format(optimizer.param_groups[0]['lr']))
 
             if iteration != 0 and iteration % 5000 == 0:
@@ -257,8 +258,8 @@ def train():
                                os.path.join(save_folder, file))
             iteration += 1
             # 在每个 batch 结束后添加以下代码
-            del images , targets , img_dark , out , loss_l_pa1l , loss_c_pal1 , loss_l_pa12 , loss_c_pal2 #, loss_mutual
-            torch.cuda.empty_cache()
+            # del images , targets , img_dark , out , loss_l_pa1l , loss_c_pal1 , loss_l_pa12 , loss_c_pal2 #, loss_mutual
+            # torch.cuda.empty_cache()
 
         if (epoch + 1) >= 0:
             val(epoch, net, dsfd_net, criterion)
@@ -283,11 +284,13 @@ def val(epoch, net, dsfd_net, criterion):
                 targets = [ann for ann in targets]
         img_dark = torch.stack([Low_Illumination_Degrading(images[i])[0] for i in range(images.shape[0])],
                                dim=0)
-        out= net.module.test_forward(x_dark=img_dark)#, x_light=images)
+        # out= net.module.test_forward(x_dark=img_dark)#, x_light=images)
 
-        loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
-        loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)
-        loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2
+        loss= net.module.test_forward(x_dark=img_dark, x_light=images)
+
+        # loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
+        # loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)
+        # loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2
 
         losses += loss.item()
         step += 1
