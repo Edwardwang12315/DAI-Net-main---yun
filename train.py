@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--batch_size',
-                    default=32, type=int,
+                    default=1, type=int,
                     help='Batch size for training')
 parser.add_argument('--model',
                     default='dark', type=str,
@@ -142,35 +142,35 @@ def train():
         if local_rank == 0:
             print('Load base network {}'.format(args.save_folder + basenet))
         if args.model == 'vgg' or args.model == 'dark':
-            net.vgg.load_state_dict(base_weights)
+            net.backbone.vgg.load_state_dict(base_weights)
         else:
             net.resnet.load_state_dict(base_weights)
     if not args.resume:
         if local_rank == 0:
             print('Initializing weights...')
-        net.extras.apply(net.weights_init)
-        net.fpn_topdown.apply(net.weights_init)
-        net.fpn_latlayer.apply(net.weights_init)
-        net.fpn_fem.apply(net.weights_init)
-        net.loc_pal1.apply(net.weights_init)
-        net.conf_pal1.apply(net.weights_init)
-        net.loc_pal2.apply(net.weights_init)
-        net.conf_pal2.apply(net.weights_init)
+        net.backbone.extras.apply(net.weights_init)
+        net.backbone.fpn_topdown.apply(net.weights_init)
+        net.backbone.fpn_latlayer.apply(net.weights_init)
+        net.backbone.fpn_fem.apply(net.weights_init)
+        net.backbone.loc_pal1.apply(net.weights_init)
+        net.backbone.conf_pal1.apply(net.weights_init)
+        net.backbone.loc_pal2.apply(net.weights_init)
+        net.backbone.conf_pal2.apply(net.weights_init)
         # net.ref.apply(net.weights_init)
 
     # Scaling the lr
     # 设置了根据批次大小和gpu数量调整学习率的机制
     lr = args.lr * np.round(np.sqrt(args.batch_size / 4 * torch.cuda.device_count()),4)
     param_group = []
-    param_group += [{'params': dsfd_net.vgg.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.extras.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.fpn_topdown.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.fpn_latlayer.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.fpn_fem.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.loc_pal1.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.conf_pal1.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.loc_pal2.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.conf_pal2.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.vgg.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.extras.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.fpn_topdown.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.fpn_latlayer.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.fpn_fem.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.loc_pal1.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.conf_pal1.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.loc_pal2.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.backbone.conf_pal2.parameters(), 'lr': lr}]
     # param_group += [{'params': dsfd_net.ref.parameters(), 'lr': lr / 10.}]
 
     optimizer = optim.SGD(param_group, lr=lr, momentum=args.momentum,
@@ -219,12 +219,12 @@ def train():
             # 前向传播两个分支
             t0 = time.time()
             # out,loss_mutual = net(x_dark=img_dark, x_light=images)
-            loss = net( x_dark = img_dark , x_light = images )
+            out = net( img_dark )
 
             # 损失函数整理
-            # loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targetss)
-            # loss_l_pa12, loss_c_pal2 = criterion(out[3:], targetss)
-            # loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
+            loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targetss)
+            loss_l_pa12, loss_c_pal2 = criterion(out[3:], targetss)
+            loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2# + loss_mutual
             # loss=loss_mutual
 
             loss.backward()
@@ -243,10 +243,10 @@ def train():
                     print('Timer: %.4f' % (t1 - t0))
                     print('epoch:' + repr(epoch) + ' || iter:' +
                           repr(iteration) + ' || Loss:%.4f' % (tloss))
-                    # print('->> pal1 conf loss:{:.4f} || pal1 loc loss:{:.4f}'.format(
-                    #     loss_c_pal1.item(), loss_l_pa1l.item()))
-                    # print('->> pal2 conf loss:{:.4f} || pal2 loc loss:{:.4f}'.format(
-                    #     loss_c_pal2.item(), loss_l_pa12.item()))
+                    print('->> pal1 conf loss:{:.4f} || pal1 loc loss:{:.4f}'.format(
+                        loss_c_pal1.item(), loss_l_pa1l.item()))
+                    print('->> pal2 conf loss:{:.4f} || pal2 loc loss:{:.4f}'.format(
+                        loss_c_pal2.item(), loss_l_pa12.item()))
                     # print('->> mutual loss:{:.4f}'.format(loss_mutual.item()))
                     print('->>lr:{}'.format(optimizer.param_groups[0]['lr']))
 
@@ -286,11 +286,11 @@ def val(epoch, net, dsfd_net, criterion):
                                dim=0)
         # out= net.module.test_forward(x_dark=img_dark)#, x_light=images)
 
-        loss= net.module.test_forward(x_dark=img_dark, x_light=images)
+        out= net.module.test_forward(x_dark=img_dark, x_light=images)
 
-        # loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
-        # loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)
-        # loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2
+        loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
+        loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)
+        loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2
 
         losses += loss.item()
         step += 1
