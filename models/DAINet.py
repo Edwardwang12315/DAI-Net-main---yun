@@ -406,7 +406,7 @@ class DSFD( nn.Module ) :
 
 		return R
 
-	def test_forward( self , x_dark):# , x_light ) :
+	def test_forward( self , x_dark, x_light ) :
 		with torch.no_grad() :
 			size = x_dark.size()[ 2 : ]
 			pal1_sources = list()
@@ -466,108 +466,126 @@ class DSFD( nn.Module ) :
 			# Lap_region[ 0 ] = Lap_pyrs_region[ 0 ]  # HF_enhanc+LF_region,证明暗图调整后接近源域亮度
 			# Lap_highLvl[ 0 ] = Lap_pyrs_dark[ 0 ]  # HF_region+LF_enhanc,证明暗图高频提取准确
 
-			x = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
-			# 检测通路特征提取
-			for k in range( 16 ) :# vgg13: 14 vgg16: 16
-				x = self.vgg[ k ]( x )
-
-			of1 = x
-			s = self.L2Normof1( of1 )
-			pal1_sources.append( s )
-			# apply vgg up to fc7
-			for k in range( 16,23 ) : # vgg13: 14,19 vgg16: 16,23
-				x = self.vgg[ k ]( x )
-			of2 = x
-			s = self.L2Normof2( of2 )
-			pal1_sources.append( s )
-
-			for k in range( 23,30) :  # vgg13: 19,24 vgg16: 23,30
-				x = self.vgg[ k ]( x )
-			of3 = x
-			s = self.L2Normof3( of3 )
-			pal1_sources.append( s )
-
-			for k in range( 30 , len( self.vgg ) ) :# vgg13: 24 vgg16: 30
-				x = self.vgg[ k ]( x )
-			of4 = x
-			pal1_sources.append( of4 )
-			# apply extra layers and cache source layer outputs
-
-			for k in range( 2 ) :
-				x = F.relu( self.extras[ k ]( x ) , inplace = True )
-			of5 = x
-			pal1_sources.append( of5 )
-			for k in range( 2 , 4 ) :
-				x = F.relu( self.extras[ k ]( x ) , inplace = True )
-			of6 = x
-			pal1_sources.append( of6 )
-
-			conv7 = F.relu( self.fpn_topdown[ 0 ]( of6 ) , inplace = True )
-
-			x = F.relu( self.fpn_topdown[ 1 ]( conv7 ) , inplace = True )
-			conv6 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 0 ]( of5 ) ) , inplace = True )
-
-			x = F.relu( self.fpn_topdown[ 2 ]( conv6 ) , inplace = True )
-			convfc7_2 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 1 ]( of4 ) ) , inplace = True )
-
-			x = F.relu( self.fpn_topdown[ 3 ]( convfc7_2 ) , inplace = True )
-			conv5 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 2 ]( of3 ) ) , inplace = True )
-
-			x = F.relu( self.fpn_topdown[ 4 ]( conv5 ) , inplace = True )
-			conv4 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 3 ]( of2 ) ) , inplace = True )
-
-			x = F.relu( self.fpn_topdown[ 5 ]( conv4 ) , inplace = True )
-			conv3 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 4 ]( of1 ) ) , inplace = True )
-
-			ef1 = self.fpn_fem[ 0 ]( conv3 )
-			ef1 = self.L2Normef1( ef1 )
-			ef2 = self.fpn_fem[ 1 ]( conv4 )
-			ef2 = self.L2Normef2( ef2 )
-			ef3 = self.fpn_fem[ 2 ]( conv5 )
-			ef3 = self.L2Normef3( ef3 )
-			ef4 = self.fpn_fem[ 3 ]( convfc7_2 )
-			ef5 = self.fpn_fem[ 4 ]( conv6 )
-			ef6 = self.fpn_fem[ 5 ]( conv7 )
-
-			pal2_sources = (ef1 , ef2 , ef3 , ef4 , ef5 , ef6)
-			for (x , l , c) in zip( pal1_sources , self.loc_pal1 , self.conf_pal1 ) :
-				loc_pal1.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
-				conf_pal1.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
-
-			for (x , l , c) in zip( pal2_sources , self.loc_pal2 , self.conf_pal2 ) :
-				loc_pal2.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
-				conf_pal2.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
-
-			features_maps = [ ]
-			for i in range( len( loc_pal1 ) ) :
-				feat = [ ]
-				feat += [ loc_pal1[ i ].size( 1 ) , loc_pal1[ i ].size( 2 ) ]
-				features_maps += [ feat ]
-
-			loc_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal1 ] , 1 )
-			conf_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal1 ] , 1 )
-
-			loc_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal2 ] , 1 )
-			conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
-
-			priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
-			self.priors_pal1 = priorbox.forward()
-
-			priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
-			self.priors_pal2 = priorbox.forward()
-
-			if self.phase == 'test' :
-				output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
-						conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) ) ,  # conf preds
-				                              self.priors_pal2.type( type( x.data ) ) )
-
-			else :
-				output = (loc_pal1.view( loc_pal1.size( 0 ) , -1 , 4 ) ,
-				          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
-				          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
-				          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
-
-		return output
+			# x = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
+			# # 检测通路特征提取
+			# for k in range( 16 ) :# vgg13: 14 vgg16: 16
+			# 	x = self.vgg[ k ]( x )
+			#
+			# of1 = x
+			# s = self.L2Normof1( of1 )
+			# pal1_sources.append( s )
+			# # apply vgg up to fc7
+			# for k in range( 16,23 ) : # vgg13: 14,19 vgg16: 16,23
+			# 	x = self.vgg[ k ]( x )
+			# of2 = x
+			# s = self.L2Normof2( of2 )
+			# pal1_sources.append( s )
+			#
+			# for k in range( 23,30) :  # vgg13: 19,24 vgg16: 23,30
+			# 	x = self.vgg[ k ]( x )
+			# of3 = x
+			# s = self.L2Normof3( of3 )
+			# pal1_sources.append( s )
+			#
+			# for k in range( 30 , len( self.vgg ) ) :# vgg13: 24 vgg16: 30
+			# 	x = self.vgg[ k ]( x )
+			# of4 = x
+			# pal1_sources.append( of4 )
+			# # apply extra layers and cache source layer outputs
+			#
+			# for k in range( 2 ) :
+			# 	x = F.relu( self.extras[ k ]( x ) , inplace = True )
+			# of5 = x
+			# pal1_sources.append( of5 )
+			# for k in range( 2 , 4 ) :
+			# 	x = F.relu( self.extras[ k ]( x ) , inplace = True )
+			# of6 = x
+			# pal1_sources.append( of6 )
+			#
+			# conv7 = F.relu( self.fpn_topdown[ 0 ]( of6 ) , inplace = True )
+			#
+			# x = F.relu( self.fpn_topdown[ 1 ]( conv7 ) , inplace = True )
+			# conv6 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 0 ]( of5 ) ) , inplace = True )
+			#
+			# x = F.relu( self.fpn_topdown[ 2 ]( conv6 ) , inplace = True )
+			# convfc7_2 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 1 ]( of4 ) ) , inplace = True )
+			#
+			# x = F.relu( self.fpn_topdown[ 3 ]( convfc7_2 ) , inplace = True )
+			# conv5 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 2 ]( of3 ) ) , inplace = True )
+			#
+			# x = F.relu( self.fpn_topdown[ 4 ]( conv5 ) , inplace = True )
+			# conv4 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 3 ]( of2 ) ) , inplace = True )
+			#
+			# x = F.relu( self.fpn_topdown[ 5 ]( conv4 ) , inplace = True )
+			# conv3 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 4 ]( of1 ) ) , inplace = True )
+			#
+			# ef1 = self.fpn_fem[ 0 ]( conv3 )
+			# ef1 = self.L2Normef1( ef1 )
+			# ef2 = self.fpn_fem[ 1 ]( conv4 )
+			# ef2 = self.L2Normef2( ef2 )
+			# ef3 = self.fpn_fem[ 2 ]( conv5 )
+			# ef3 = self.L2Normef3( ef3 )
+			# ef4 = self.fpn_fem[ 3 ]( convfc7_2 )
+			# ef5 = self.fpn_fem[ 4 ]( conv6 )
+			# ef6 = self.fpn_fem[ 5 ]( conv7 )
+			#
+			# pal2_sources = (ef1 , ef2 , ef3 , ef4 , ef5 , ef6)
+			# for (x , l , c) in zip( pal1_sources , self.loc_pal1 , self.conf_pal1 ) :
+			# 	loc_pal1.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+			# 	conf_pal1.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+			#
+			# for (x , l , c) in zip( pal2_sources , self.loc_pal2 , self.conf_pal2 ) :
+			# 	loc_pal2.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+			# 	conf_pal2.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+			#
+			# features_maps = [ ]
+			# for i in range( len( loc_pal1 ) ) :
+			# 	feat = [ ]
+			# 	feat += [ loc_pal1[ i ].size( 1 ) , loc_pal1[ i ].size( 2 ) ]
+			# 	features_maps += [ feat ]
+			#
+			# loc_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal1 ] , 1 )
+			# conf_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal1 ] , 1 )
+			#
+			# loc_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal2 ] , 1 )
+			# conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
+			#
+			# priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
+			# self.priors_pal1 = priorbox.forward()
+			#
+			# priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
+			# self.priors_pal2 = priorbox.forward()
+			#
+			# if self.phase == 'test' :
+			# 	output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
+			# 			conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) ) ,  # conf preds
+			# 	                              self.priors_pal2.type( type( x.data ) ) )
+			#
+			# else :
+			# 	output = (loc_pal1.view( loc_pal1.size( 0 ) , -1 , 4 ) ,
+			# 	          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
+			# 	          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
+			# 	          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
+			
+			# 亮图通路
+			Lap_pyrs_light = [ ]
+			# Lap_pyrs_region = [ ]
+			# 整理输出
+			pyrs_light = self.lap_pyramid.pyramid_decom( img = x_light )  # HF1 HF2 HF3 LF
+			for i in range( self.num_high + 1 ) :  # 传递4个分频
+				Lap_pyrs_light.append( pyrs_light[ -1 - i ] )  # LF HF3 HF2 HF1
+			
+			HFs_dark = Lap_pyrs_dark[ 1 : ]
+			HFs_light = Lap_pyrs_light[ 1 : ]
+			loss_mutual = 0
+			
+			for i in range( len( HFs_dark ) ) :
+				HF_dark = HFs_dark[ i ].flatten( start_dim = 2 ).mean( dim = -1 )
+				HF_light = HFs_light[ i ].flatten( start_dim = 2 ).mean( dim = -1 )
+				loss_mutual = loss_mutual + cfg.WEIGHT.MC * (
+							self.KL( HF_dark , HF_light ) + self.KL( HF_light , HF_dark ))
+		
+		return loss_mutual # output
 
 	# during training, the model takes the paired images, and their pseudo GT illumination maps from the Retinex Decom Net
 	def forward( self , x_dark , x_light ) :
@@ -599,13 +617,13 @@ class DSFD( nn.Module ) :
 			                                                       commom_guide[ i ] )  # HF4 HF3 HF2 HF1
 			Lap_pyrs_dark.append( HFs )  # LF HF3 HF2 HF1
 		# 全局亮度调整
-		Lap_pyrs_dark[ 0 ] = self.illumination_global(img= x_dark ,LF=Lap_pyrs_dark[ 0 ], level = self.num_high )
+		# Lap_pyrs_dark[ 0 ] = self.illumination_global(img= x_dark ,LF=Lap_pyrs_dark[ 0 ], level = self.num_high )
 
 		# HFs向下 细节增强
-		for i in range( self.num_high ) :
-			# 从高频输出返回的重点信息位置
-			Lap_pyrs_dark[ 0 ]=self.__getattr__( 'down_guide_attention{}'.format( i ) )(
-					HF=Lap_pyrs_dark[ -1 - i ] , level=self.num_high - i ,LF=Lap_pyrs_dark[ 0 ])  # 得到LA位置注意力
+		# for i in range( self.num_high ) :
+		# 	# 从高频输出返回的重点信息位置
+		# 	Lap_pyrs_dark[ 0 ]=self.__getattr__( 'down_guide_attention{}'.format( i ) )(
+		# 			HF=Lap_pyrs_dark[ -1 - i ] , level=self.num_high - i ,LF=Lap_pyrs_dark[ 0 ])  # 得到LA位置注意力
 
 		# 亮图通路
 		Lap_pyrs_light = [ ]
@@ -617,7 +635,7 @@ class DSFD( nn.Module ) :
 
 		# 全局亮度调整
 		# Lap_pyrs_region = Lap_pyrs_light
-		Lap_pyrs_light[ 0 ] = self.illumination_global(img= x_light ,LF=Lap_pyrs_light[ 0 ], level = self.num_high )
+		# Lap_pyrs_light[ 0 ] = self.illumination_global(img= x_light ,LF=Lap_pyrs_light[ 0 ], level = self.num_high )
 
 		# 不同来源 图像重建
 		# 照明调整 Lap:LF HF3 HF2 HF1
@@ -630,106 +648,106 @@ class DSFD( nn.Module ) :
 			HF_light=HFs_light[i].flatten( start_dim = 2 ).mean( dim = -1 )
 			loss_mutual = loss_mutual+cfg.WEIGHT.MC *( self.KL( HF_dark , HF_light ) + self.KL( HF_light , HF_dark ))
 
-		# 检测通路特征提取
-		x = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
-		for k in range( 16 ) :  # vgg13: 14 vgg16: 16
-			x = self.vgg[ k ]( x )
+		# # 检测通路特征提取
+		# x = self.lap_pyramid.pyramid_recons( Lap_pyrs_dark )  # 输出图
+		# for k in range( 16 ) :  # vgg13: 14 vgg16: 16
+		# 	x = self.vgg[ k ]( x )
+		#
+		# of1 = x  # 16个vgg后的输出
+		# s = self.L2Normof1( of1 )
+		# pal1_sources.append( s )
+		# # apply vgg up to fc7
+		# for k in range(16,23) :  # vgg13: 14,19 vgg16: 16,23
+		# 	x = self.vgg[ k ]( x )
+		# of2 = x
+		# s = self.L2Normof2( of2 )
+		# pal1_sources.append( s )
+		#
+		# for k in range( 23,30) :  # vgg13: 19,24 vgg16: 23,30
+		# 	x = self.vgg[ k ]( x )
+		# of3 = x
+		# s = self.L2Normof3( of3 )
+		# pal1_sources.append( s )
+		#
+		# for k in range( 30 , len( self.vgg ) ) :  # vgg13: 24 vgg16: 30
+		# 	x = self.vgg[ k ]( x )
+		# of4 = x
+		# pal1_sources.append( of4 )
+		#
+		# for k in range( 2 ) :
+		# 	x = F.relu( self.extras[ k ]( x ) , inplace = True )
+		# of5 = x
+		# pal1_sources.append( of5 )
+		# for k in range( 2 , 4 ) :
+		# 	x = F.relu( self.extras[ k ]( x ) , inplace = True )
+		# of6 = x
+		# pal1_sources.append( of6 )
+		#
+		# conv7 = F.relu( self.fpn_topdown[ 0 ]( of6 ) , inplace = True )
+		#
+		# x = F.relu( self.fpn_topdown[ 1 ]( conv7 ) , inplace = True )
+		# conv6 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 0 ]( of5 ) ) , inplace = True )
+		#
+		# x = F.relu( self.fpn_topdown[ 2 ]( conv6 ) , inplace = True )
+		# convfc7_2 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 1 ]( of4 ) ) , inplace = True )
+		#
+		# x = F.relu( self.fpn_topdown[ 3 ]( convfc7_2 ) , inplace = True )
+		# conv5 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 2 ]( of3 ) ) , inplace = True )
+		#
+		# x = F.relu( self.fpn_topdown[ 4 ]( conv5 ) , inplace = True )
+		# conv4 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 3 ]( of2 ) ) , inplace = True )
+		#
+		# x = F.relu( self.fpn_topdown[ 5 ]( conv4 ) , inplace = True )
+		# conv3 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 4 ]( of1 ) ) , inplace = True )
+		#
+		# ef1 = self.fpn_fem[ 0 ]( conv3 )
+		# ef1 = self.L2Normef1( ef1 )
+		# ef2 = self.fpn_fem[ 1 ]( conv4 )
+		# ef2 = self.L2Normef2( ef2 )
+		# ef3 = self.fpn_fem[ 2 ]( conv5 )
+		# ef3 = self.L2Normef3( ef3 )
+		# ef4 = self.fpn_fem[ 3 ]( convfc7_2 )
+		# ef5 = self.fpn_fem[ 4 ]( conv6 )
+		# ef6 = self.fpn_fem[ 5 ]( conv7 )
+		#
+		# pal2_sources = (ef1 , ef2 , ef3 , ef4 , ef5 , ef6)
+		# for (x , l , c) in zip( pal1_sources , self.loc_pal1 , self.conf_pal1 ) :
+		# 	loc_pal1.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+		# 	conf_pal1.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+		#
+		# for (x , l , c) in zip( pal2_sources , self.loc_pal2 , self.conf_pal2 ) :
+		# 	loc_pal2.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+		# 	conf_pal2.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+		#
+		# features_maps = [ ]
+		# for i in range( len( loc_pal1 ) ) :
+		# 	feat = [ ]
+		# 	feat += [ loc_pal1[ i ].size( 1 ) , loc_pal1[ i ].size( 2 ) ]
+		# 	features_maps += [ feat ]
+		#
+		# loc_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal1 ] , 1 )
+		# conf_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal1 ] , 1 )
+		#
+		# loc_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal2 ] , 1 )
+		# conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
+		#
+		# priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
+		# self.priors_pal1 = priorbox.forward().requires_grad_(False)
+		# priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
+		# self.priors_pal2 = priorbox.forward().requires_grad_(False)
+		#
+		# if self.phase == 'test' :
+		# 	output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
+		# 			conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) ) ,  # conf preds
+		# 	                              self.priors_pal2.type( type( x.data ) ) )
+		#
+		# else :
+		# 	output = (loc_pal1.view( loc_pal1.size( 0 ) , -1 , 4 ) ,
+		# 	          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
+		# 	          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
+		# 	          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
 
-		of1 = x  # 16个vgg后的输出
-		s = self.L2Normof1( of1 )
-		pal1_sources.append( s )
-		# apply vgg up to fc7
-		for k in range(16,23) :  # vgg13: 14,19 vgg16: 16,23
-			x = self.vgg[ k ]( x )
-		of2 = x
-		s = self.L2Normof2( of2 )
-		pal1_sources.append( s )
-
-		for k in range( 23,30) :  # vgg13: 19,24 vgg16: 23,30
-			x = self.vgg[ k ]( x )
-		of3 = x
-		s = self.L2Normof3( of3 )
-		pal1_sources.append( s )
-
-		for k in range( 30 , len( self.vgg ) ) :  # vgg13: 24 vgg16: 30
-			x = self.vgg[ k ]( x )
-		of4 = x
-		pal1_sources.append( of4 )
-
-		for k in range( 2 ) :
-			x = F.relu( self.extras[ k ]( x ) , inplace = True )
-		of5 = x
-		pal1_sources.append( of5 )
-		for k in range( 2 , 4 ) :
-			x = F.relu( self.extras[ k ]( x ) , inplace = True )
-		of6 = x
-		pal1_sources.append( of6 )
-
-		conv7 = F.relu( self.fpn_topdown[ 0 ]( of6 ) , inplace = True )
-
-		x = F.relu( self.fpn_topdown[ 1 ]( conv7 ) , inplace = True )
-		conv6 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 0 ]( of5 ) ) , inplace = True )
-
-		x = F.relu( self.fpn_topdown[ 2 ]( conv6 ) , inplace = True )
-		convfc7_2 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 1 ]( of4 ) ) , inplace = True )
-
-		x = F.relu( self.fpn_topdown[ 3 ]( convfc7_2 ) , inplace = True )
-		conv5 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 2 ]( of3 ) ) , inplace = True )
-
-		x = F.relu( self.fpn_topdown[ 4 ]( conv5 ) , inplace = True )
-		conv4 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 3 ]( of2 ) ) , inplace = True )
-
-		x = F.relu( self.fpn_topdown[ 5 ]( conv4 ) , inplace = True )
-		conv3 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 4 ]( of1 ) ) , inplace = True )
-
-		ef1 = self.fpn_fem[ 0 ]( conv3 )
-		ef1 = self.L2Normef1( ef1 )
-		ef2 = self.fpn_fem[ 1 ]( conv4 )
-		ef2 = self.L2Normef2( ef2 )
-		ef3 = self.fpn_fem[ 2 ]( conv5 )
-		ef3 = self.L2Normef3( ef3 )
-		ef4 = self.fpn_fem[ 3 ]( convfc7_2 )
-		ef5 = self.fpn_fem[ 4 ]( conv6 )
-		ef6 = self.fpn_fem[ 5 ]( conv7 )
-
-		pal2_sources = (ef1 , ef2 , ef3 , ef4 , ef5 , ef6)
-		for (x , l , c) in zip( pal1_sources , self.loc_pal1 , self.conf_pal1 ) :
-			loc_pal1.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
-			conf_pal1.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
-
-		for (x , l , c) in zip( pal2_sources , self.loc_pal2 , self.conf_pal2 ) :
-			loc_pal2.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
-			conf_pal2.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
-
-		features_maps = [ ]
-		for i in range( len( loc_pal1 ) ) :
-			feat = [ ]
-			feat += [ loc_pal1[ i ].size( 1 ) , loc_pal1[ i ].size( 2 ) ]
-			features_maps += [ feat ]
-
-		loc_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal1 ] , 1 )
-		conf_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal1 ] , 1 )
-
-		loc_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal2 ] , 1 )
-		conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
-
-		priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
-		self.priors_pal1 = priorbox.forward().requires_grad_(False)
-		priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
-		self.priors_pal2 = priorbox.forward().requires_grad_(False)
-
-		if self.phase == 'test' :
-			output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
-					conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) ) ,  # conf preds
-			                              self.priors_pal2.type( type( x.data ) ) )
-
-		else :
-			output = (loc_pal1.view( loc_pal1.size( 0 ) , -1 , 4 ) ,
-			          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
-			          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
-			          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
-
-		return output , loss_mutual
+		return  loss_mutual # output ,
 
 	def load_weights( self , base_file ) :
 		other , ext = os.path.splitext( base_file )
