@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import random
 import scipy.stats as stats
+from torchvision import transforms
+
 
 def apply_ccm(image, ccm):
     '''
@@ -132,7 +134,6 @@ def Low_Illumination_Degrading(img, safe_invert=False):
     shot_noise, read_noise = random_noise_levels()
     var = img5 * shot_noise + read_noise  # here the read noise is independent
     var = torch.max(var, epsilon)
-    # print('the var is:', var)
     noise = torch.normal(mean=0, std=torch.sqrt(var))
     img6 = img5 + noise
 
@@ -173,4 +174,10 @@ def Low_Illumination_Degrading(img, safe_invert=False):
     para_gt = torch.tensor([darkness, 1.0 / gamma, 1.0 / red_gain, 1.0 / blue_gain], dtype=torch.float, device=device)
     # others_gt = torch.FloatTensor([1.0 / gamma, 1.0, 1.0]).to(torch.device(device))
     # print('the degration information:', degration_info)
+    
+    # trans = transforms.Compose( [transforms.ToPILImage()] )
+    # img = trans( (img_low.squeeze( 0 )) )
+    # img.save('isp.png')
+    # exit()
+    
     return img_low, para_gt
