@@ -12,9 +12,11 @@ import argparse
 import torch.optim as optim
 import torch.utils.data as data
 import numpy as np
+from mpl_toolkits.mplot3d.proj3d import transform
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
+from torchvision import transforms
 from torchmetrics.functional import structural_similarity_index_measure as ssim
 
 from data.config import cfg
@@ -30,7 +32,7 @@ parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--batch_size',
-                    default=12, type=int,
+                    default=2, type=int,
                     help='Batch size for training')
 parser.add_argument('--model',
                     default='dark', type=str,
@@ -116,7 +118,6 @@ val_loader = data.DataLoader(val_dataset, batch_size=val_batchsize,
 
 min_loss = np.inf
 
-
 def train():
     per_epoch_size = len(train_dataset) // (args.batch_size * torch.cuda.device_count())/100
     start_epoch = 0
@@ -199,18 +200,20 @@ def train():
 
     net.train()
     corr_mat = None
+    
+    trans=transforms.ToPILImage()
+    
     for epoch in range(start_epoch, cfg.EPOCHES):
         losses = 0
         # print(f"###epoch{epoch} is working")
         for batch_idx, (images, targets, _) in enumerate(train_loader):
-
-            images = images.cuda() / 255.
+            images = images.cuda() #这里不能归一化
             with torch.no_grad():
                 targetss = [ann.cuda() for ann in targets]
             img_dark = torch.empty(size=(images.shape[0], images.shape[1], images.shape[2], images.shape[3])).cuda()
             # Generation of degraded data and AET groundtruth
             for i in range(images.shape[0]):
-                img_dark[i], _ = Low_Illumination_Degrading(images[i])#ISP方法生成低照度图像
+                img_dark[i], _ = Low_Illumination_Degrading(images[i]/255.,safe_invert = True)#ISP方法生成低照度图像
 
             if iteration in cfg.LR_STEPS:
                 step_index += 1
@@ -219,7 +222,7 @@ def train():
             # 前向传播两个分支
             t0 = time.time()
             # out,loss_mutual = net(x_dark=img_dark, x_light=images)
-            out = net( img_dark )
+            out = net( img_dark)
 
             # 损失函数整理
             loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targetss)
@@ -286,7 +289,7 @@ def val(epoch, net, dsfd_net, criterion):
                                dim=0)
         # out= net.module.test_forward(x_dark=img_dark)#, x_light=images)
 
-        out= net.module.test_forward(x_dark=img_dark, x_light=images)
+        out= net.module.test_forward(x=img_dark)
 
         loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
         loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)
