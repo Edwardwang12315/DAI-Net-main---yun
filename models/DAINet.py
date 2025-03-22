@@ -502,6 +502,7 @@ class DSFD( nn.Module ) :
 		# enhancement
 		self.enhancement = DENet()
 		
+		self.transform = transforms.Compose( transforms.ToPILImage() )
 		# backbone
 		self.backbone = VGG16(phase , base , extras , fem , head1 , head2 , num_classes)
 		
@@ -510,12 +511,16 @@ class DSFD( nn.Module ) :
 		with torch.no_grad() :
 			
 			x1=self.enhancement(x)
+			
+			# x2=self.transform(x1.squeeze(0))
+			# x2.save('enhancement.png')
+			
 			out=self.backbone(x1)
 			
 		return out
 
 	# during training, the model takes the paired images, and their pseudo GT illumination maps from the Retinex Decom Net
-	def forward( self , x ) :
+	def forward( self , x ) :#输入x是归一化后的输入
 		x1 = self.enhancement( x )
 		
 		out = self.backbone( x1 )
