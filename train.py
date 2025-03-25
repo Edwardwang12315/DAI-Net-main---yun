@@ -27,6 +27,7 @@ from models.enhancer import RetinexNet
 from utils.DarkISP import Low_Illumination_Degrading
 from PIL import Image
 import inspect
+from weights.pth_LoadLocalWeight import LoadLocalW
 
 parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
@@ -158,6 +159,9 @@ def train():
         net.backbone.loc_pal2.apply(net.weights_init)
         net.backbone.conf_pal2.apply(net.weights_init)
         net.enhancement.apply(net.weights_init)
+        
+        net=LoadLocalW( net,path_oriMod=os.path.join(args.save_folder,'best.pt') )
+        
         # net.ref.apply(net.weights_init)
 
     # Scaling the lr
@@ -235,12 +239,6 @@ def train():
             loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targetss)
             loss_l_pa12, loss_c_pal2 = criterion(out[3:], targetss)
             
-            loss_l1+=loss_l_pa1l.item()
-            loss_c1+=loss_c_pal1.item()
-            loss_l2+=loss_l_pa12.item()
-            loss_c2+=loss_c_pal2.item()
-            loss_mu+=loss_mutual.item()
-            
             loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
             # loss=loss_mutual
 
@@ -251,34 +249,42 @@ def train():
             optimizer.step()
             t1 = time.time()
             losses += loss.item()
+            loss_l1+=loss_l_pa1l.item()
+            loss_c1+=loss_c_pal1.item()
+            loss_l2+=loss_l_pa12.item()
+            loss_c2+=loss_c_pal2.item()
+            loss_mu+=loss_mutual.item()
+            
             # del loss
             # torch.cuda.empty_cache()  # 释放未使用的缓存内存
 
             if iteration % 100 == 0:
-                tloss = losses / (batch_idx + 1)
-                
-                loss_l1 = loss_l1 / (batch_idx + 1)
-                loss_c1 = loss_c1 / (batch_idx + 1)
-                loss_l2 = loss_l2 / (batch_idx + 1)
-                loss_c2 = loss_c2 / (batch_idx + 1)
-                loss_mu = loss_mu / (batch_idx + 1)
+                # 每次显示的损失只包含当前一个batch的平均损失
+                tloss = losses
+                tloss_l1 = loss_l1
+                tloss_c1 = loss_c1
+                tloss_l2 = loss_l2
+                tloss_c2 = loss_c2
+                tloss_mu = loss_mu
                 
                 if local_rank == 0:
                     print('Timer: %.4f' % (t1 - t0))
                     print('epoch:' + repr(epoch) + ' || iter:' +
                           repr(iteration) + ' || Loss:%.4f' % (tloss))
                     print('->> pal1 conf loss:{:.4f} || pal1 loc loss:{:.4f}'.format(
-                        loss_c1, loss_l1))
+                        tloss_c1, tloss_l1))
                     print('->> pal2 conf loss:{:.4f} || pal2 loc loss:{:.4f}'.format(
-                        loss_c2, loss_l2))
-                    print('->> mutual loss:{:.4f}'.format(loss_mu))
+                        tloss_c2, tloss_l2))
+                    print('->> mutual loss:{:.4f}'.format(tloss_mu))
                     print('->>lr:{}'.format(optimizer.param_groups[0]['lr']))
+                    val(epoch, net, dsfd_net, criterion)
                 
-                losses=0
+                losses = 0
                 loss_l1 = 0
                 loss_c1 = 0
                 loss_l2 = 0
                 loss_c2 = 0
+                loss_mu = 0
 
             if iteration != 0 and iteration % 5000 == 0:
                 if local_rank == 0:
@@ -320,7 +326,8 @@ def val(epoch, net, dsfd_net, criterion):
 
         loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
         loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)
-        loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2+loss_mutual
+        
+        loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
 
         losses += loss.item()
         step += 1

@@ -32,4 +32,4 @@ def save_pth_dict_to_txt( pth_path , txt_path ) :
 # 使用示例
 # save_pth_dict_to_txt( 'DarkFaceZSDA.pth' , 'DarkFaceZSDA.txt' )
 # save_pth_dict_to_txt( 'dsfd_40000.pth' , 'dsfd_40000.txt' )
-save_pth_dict_to_txt( 'dsfd.pth' , 'dsfd.txt' )
+save_pth_dict_to_txt( 'best.pt' , 'best.txt' )

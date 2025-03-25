@@ -110,8 +110,30 @@ On ExDark:
 - 在VGG中对两幅图像进行初步提取特征再进行KL损失计算，出现nan的问题已解决
 - CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch --nproc_per_node=1 train.py  训练指令      
 - **临时启用鼠标**：在tmux会话中按下`Ctrl + b`，然后输入`:set -g mouse on`并按回车
-- 损失函数显示错误, 修改为显示平均值，总loss应该显示当前100个iter的平均值
+- 损失函数显示错误, 修改为显示平均值，总loss应该显示当前100个iter的平均值(发现严重问题：损失一百次累加一次，次数计数无限累加。已修改，只显示近100个batch的总损失)
+- 
 - 修改后正确显示损失了，效果非常好（把mutual改成了5）
+- 关机后也能正常运行
+- val时显示loss不太准确
+
+- DENet部分引入预训练权重，测试加速收敛效果如何：loss_mutual非常小
+- 无预训练测试时长：3.25 日 20：00 至  日
+
+- 增加动态亮度调整模块
+- 增加细节亮度微调模块
+
+```bash
+# 安装 tmux（如果未安装）：
+sudo apt-get install tmux  # Ubuntu/Debian
+# 启动 tmux 会话：
+tmux new -s training
+# 在 tmux 会话中运行训练任务：
+python train.py
+# 分离会话（保持任务运行）：
+按 Ctrl + B，然后按 D。
+# 重新连接会话：
+tmux attach -t training
+```
 
 ## Github操作：
 
