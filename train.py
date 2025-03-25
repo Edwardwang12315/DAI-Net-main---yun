@@ -63,7 +63,7 @@ parser.add_argument('--multigpu',
                     default=True, type=bool,
                     help='Use mutil Gpu training')
 parser.add_argument('--save_folder',
-                    default='weights/',
+                    default='../model/forDAINet/',
                     help='Directory for saving checkpoint models')
 parser.add_argument('--local_rank',
                     type=int,

@@ -68,8 +68,8 @@ _C.WEIGHT.MC = 5
 
 # face config
 _C.FACE = EasyDict()
-_C.FACE.TRAIN_FILE = './dataset/WiderFace/wider_face_train.txt'
-_C.FACE.VAL_FILE = './dataset/WiderFace/wider_face_val.txt'
+_C.FACE.TRAIN_FILE = '../dataset/WiderFace/wider_face_train_self.txt'
+_C.FACE.VAL_FILE = '../dataset/WiderFace/wider_face_val_self.txt'
 
 _C.FACE.OVERLAP_THRESH = 0.35
 
