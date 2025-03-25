@@ -127,7 +127,7 @@ git remote add origin git@github.com:**** # 和仓库建立远程联系
 ```bash
 git add -A # 添加所有文件到 缓存区
 git commit -m "修改内容" # 缓存区内容提交到云区
-git push
+git push --set-upstream origin main
 ```
 
 
