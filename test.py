@@ -65,20 +65,8 @@ def detect_face(img, tmp_shrink):
     if use_cuda:
         x = x.cuda()
     net.eval()
-    y = net.test_forward(x)
+    y,_ = net.test_forward(x_dark=x,x_light = x)
     detections = y.data.cpu().numpy()
-    # 调整维度顺序 [C, H, W] → [H, W, C]
-    # image = np.transpose( image , (1 , 2 , 0) )
-
-    # # 转换为 0~255 的 uint8 类型
-    # image = (image * 255).astype( np.uint8 )
-    #
-    # # 显示图像
-    # print("错误位置")
-    # plt.imshow( image )
-    # plt.axis( 'off' )
-    # plt.show()
-    # exit()
     scale = np.array([img.shape[1], img.shape[0], img.shape[1], img.shape[0]])
 
     boxes=[]
@@ -222,7 +210,7 @@ def load_models():
     print('build network')
     net = build_net('test', num_classes=2, model='dark')
     net.eval()
-    net.load_state_dict(torch.load('./weights/dsfd.pth')) # Set the dir of your model weight
+    net.load_state_dict(torch.load('../model/forDAINet/dark/dsfd.pth')) # Set the dir of your model weight
 
     if use_cuda:
         net = net.cuda()

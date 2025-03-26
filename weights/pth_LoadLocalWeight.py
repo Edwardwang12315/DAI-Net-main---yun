@@ -4,10 +4,12 @@ from models.factory import build_net
 
 def LoadLocalW(net,path_oriMod):
 	# 加载预训练权重
-	ori_module=torch.load(path_oriMod)#'./weights/best.pt'
-	ori_module_dict=ori_module['model']
+	ori_module=torch.load(path_oriMod)
+	
+	ori_module_dict=ori_module # 当权重文件直接保存了模型权重时使用
+	# ori_module_dict=ori_module['model'] # 当权重文件用一个字典包装了模型权重时使用
+	
 	tar_module_dict=net.state_dict()
-	# torch.save(tar_module_dict,'tar_module_dict_ori.pth')
 
 	# 筛选出名称和结构相同的模块权重
 	matched_dict = {
@@ -21,11 +23,12 @@ def LoadLocalW(net,path_oriMod):
 
 	# 加载到新模型
 	net.load_state_dict( tar_module_dict )
+	
 	# tar_module_dict=net.state_dict()
 	# torch.save(tar_module_dict,'tar_module_dict.pth')
 	return net
 
-net=build_net('train',1, 'dark')
-tar_module_dict = net.state_dict()
-torch.save(tar_module_dict,'test.pth')
+# net=build_net('train',1, 'dark')
+# tar_module_dict = net.state_dict()
+# torch.save(tar_module_dict,'test.pth')
 # LoadLocalW(net)

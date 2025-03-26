@@ -28,12 +28,13 @@ from utils.DarkISP import Low_Illumination_Degrading
 from PIL import Image
 import inspect
 from weights.pth_LoadLocalWeight import LoadLocalW
+import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--batch_size',
-                    default=1, type=int,
+                    default=3, type=int,
                     help='Batch size for training')
 parser.add_argument('--model',
                     default='dark', type=str,
@@ -144,39 +145,38 @@ def train():
         if local_rank == 0:
             print('Load base network {}'.format(args.save_folder + basenet))
         if args.model == 'vgg' or args.model == 'dark':
-            net.backbone.vgg.load_state_dict(base_weights)
+            net.vgg.load_state_dict(base_weights)
         else:
             net.resnet.load_state_dict(base_weights)
     if not args.resume:
         if local_rank == 0:
             print('Initializing weights...')
-        net.backbone.extras.apply(net.weights_init)
-        net.backbone.fpn_topdown.apply(net.weights_init)
-        net.backbone.fpn_latlayer.apply(net.weights_init)
-        net.backbone.fpn_fem.apply(net.weights_init)
-        net.backbone.loc_pal1.apply(net.weights_init)
-        net.backbone.conf_pal1.apply(net.weights_init)
-        net.backbone.loc_pal2.apply(net.weights_init)
-        net.backbone.conf_pal2.apply(net.weights_init)
+        net.extras.apply(net.weights_init)
+        net.fpn_topdown.apply(net.weights_init)
+        net.fpn_latlayer.apply(net.weights_init)
+        net.fpn_fem.apply(net.weights_init)
+        net.loc_pal1.apply(net.weights_init)
+        net.conf_pal1.apply(net.weights_init)
+        net.loc_pal2.apply(net.weights_init)
+        net.conf_pal2.apply(net.weights_init)
         net.enhancement.apply(net.weights_init)
         
         net=LoadLocalW( net,path_oriMod=os.path.join(args.save_folder,'best.pt') )
-        
-        # net.ref.apply(net.weights_init)
+        net=LoadLocalW(net,path_oriMod = os.path.join(args.save_folder,'DarkFaceFS.pth'))
 
     # Scaling the lr
     # 设置了根据批次大小和gpu数量调整学习率的机制
     lr = args.lr * np.round(np.sqrt(args.batch_size / 4 * torch.cuda.device_count()),4)
     param_group = []
-    param_group += [{'params': dsfd_net.backbone.vgg.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.backbone.extras.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.backbone.fpn_topdown.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.backbone.fpn_latlayer.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.backbone.fpn_fem.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.backbone.loc_pal1.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.backbone.conf_pal1.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.backbone.loc_pal2.parameters(), 'lr': lr}]
-    param_group += [{'params': dsfd_net.backbone.conf_pal2.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.vgg.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.extras.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.fpn_topdown.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.fpn_latlayer.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.fpn_fem.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.loc_pal1.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.conf_pal1.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.loc_pal2.parameters(), 'lr': lr}]
+    param_group += [{'params': dsfd_net.conf_pal2.parameters(), 'lr': lr}]
     # param_group += [{'params': dsfd_net.ref.parameters(), 'lr': lr / 10.}]
 
     optimizer = optim.SGD(param_group, lr=lr, momentum=args.momentum,
@@ -224,8 +224,8 @@ def train():
             img_dark = torch.empty(size=(images.shape[0], images.shape[1], images.shape[2], images.shape[3])).cuda()
             # Generation of degraded data and AET groundtruth
             for i in range(images.shape[0]):
-                img_dark[i], _ = Low_Illumination_Degrading(images[i],safe_invert = True)#ISP方法生成低照度图像
-
+                img_dark[i], _ = Low_Illumination_Degrading(images[i],safe_invert = False)#ISP方法生成低照度图像
+                
             if iteration in cfg.LR_STEPS:
                 step_index += 1
                 adjust_learning_rate(optimizer, args.gamma, step_index)
@@ -277,7 +277,6 @@ def train():
                         tloss_c2, tloss_l2))
                     print('->> mutual loss:{:.4f}'.format(tloss_mu))
                     print('->>lr:{}'.format(optimizer.param_groups[0]['lr']))
-                    val(epoch, net, dsfd_net, criterion)
                 
                 losses = 0
                 loss_l1 = 0
@@ -293,9 +292,6 @@ def train():
                     torch.save(dsfd_net.state_dict(),
                                os.path.join(save_folder, file))
             iteration += 1
-            # 在每个 batch 结束后添加以下代码
-            # del images , targets , img_dark , out , loss_l_pa1l , loss_c_pal1 , loss_l_pa12 , loss_c_pal2 #, loss_mutual
-            # torch.cuda.empty_cache()
 
         if (epoch + 1) >= 0:
             val(epoch, net, dsfd_net, criterion)
@@ -321,8 +317,6 @@ def val(epoch, net, dsfd_net, criterion):
         img_dark = torch.stack([Low_Illumination_Degrading(images[i])[0] for i in range(images.shape[0])],
                                dim=0)
         out,loss_mutual= net.module.test_forward(x_dark=img_dark, x_light=images)
-
-        # out= net.module.test_forward(x=img_dark)
 
         loss_l_pa1l, loss_c_pal1 = criterion(out[:3], targets)
         loss_l_pa12, loss_c_pal2 = criterion(out[3:], targets)

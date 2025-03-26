@@ -28,8 +28,4 @@ def save_pth_dict_to_txt( pth_path , txt_path ) :
 		for key , value in data.items() :
 			_write_item( key , value , indent = 0 )
 
-
-# 使用示例
-# save_pth_dict_to_txt( 'DarkFaceZSDA.pth' , 'DarkFaceZSDA.txt' )
-# save_pth_dict_to_txt( 'dsfd_40000.pth' , 'dsfd_40000.txt' )
-save_pth_dict_to_txt( 'best.pt' , 'best.txt' )
+save_pth_dict_to_txt( 'tar_module_dict.pth' , 'tar_module_dict.txt' )

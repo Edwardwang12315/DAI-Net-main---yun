@@ -157,6 +157,15 @@ class Lap_Pyramid_Conv( nn.Module ) :
 			diff = current - up
 			pyr.append( diff )
 			current = down
+			
+			# 调试点
+			# print('金字塔分解')
+			# image = np.transpose( diff[0].detach().cpu().numpy() , (1 , 2 , 0) )  # 调整维度顺序 [C, H, W] → [H, W, C]
+			# image = (image * 255).astype( np.uint8 )
+			# plt.imshow( image )
+			# plt.axis( 'off' )
+			# plt.show()
+			
 		pyr.append( current )
 		return pyr
 
@@ -233,6 +242,8 @@ class Trans_low( nn.Module ) :
 
 
 class illumination_global( nn.Module ) :
+	# 让亮图前后LF趋同，暗图通过后LF和亮图的LF也趋同
+	# 计划用神经网络结合isp方法（iayolo）来实现
 	def __init__( self , weight_init , kernel_size = 7 ) :
 		super().__init__()
 		# assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
@@ -246,12 +257,6 @@ class illumination_global( nn.Module ) :
 		self.scale_conv = nn.Sequential( nn.Conv2d( 3 , 32 , kernel_size , padding = kernel_size // 2 ) )
 		self.decoder = nn.Sequential( nn.Conv2d( 32 , 3 , kernel_size , padding = kernel_size // 2 ) )
 
-	# self.downsample.apply( weight_init )
-	# self.encoder.apply( weight_init )
-	# self.shift_conv.apply( weight_init )
-	# self.scale_conv.apply( weight_init )
-	# self.decoder.apply( weight_init )
-
 	def forward( self , img , LF , level ) :
 		# 下采样
 		for i in range( level ) :  # LF HF3 HF2 HF1 0 1 2 3
@@ -262,9 +267,12 @@ class illumination_global( nn.Module ) :
 		LF = LF * scale + LF
 
 		return LF
+	
+# class DIPmodule():
 
 
 class down_finetune( nn.Module ) :
+	#
 	def __init__( self , weight_init , kernel_size = 3 , channels = 3 ) :
 		super().__init__()
 		self.conv = nn.Sequential( nn.Conv2d( 2 , 1 , kernel_size , padding = 1 ) , nn.Sigmoid() )
@@ -300,7 +308,8 @@ class DENet( nn.Module ) :
 		for i in range( 0 , self.num_high ) :
 			self.__setattr__( 'up_guide_layer_{}'.format( i ) , Up_guide( up_ksize , ch = 3 ) )
 			self.__setattr__( 'trans_high_layer_{}'.format( i ) , Trans_high( 3 , high_ch , 3 , high_ksize ) )
-
+	
+	# (HF_d + LF_l) VS (HF_l + LF_l) 增强模块提取高频信号效果好；输出图像是亮度良好的。
 	def forward( self , x_dark , x_light ) :
 		# HF1 HF2 HF3 LF
 		pyrs_d = self.lap_pyramid.pyramid_decom( img = x_dark )
@@ -308,6 +317,7 @@ class DENet( nn.Module ) :
 
 		# 对暗图增强
 		trans_pyrs = [ ]
+		recon_pyrs=[]
 		trans_pyr , guide = self.trans_low( pyrs_d[ -1 ] )
 		trans_pyrs.append( trans_pyr )
 
@@ -320,23 +330,17 @@ class DENet( nn.Module ) :
 			trans_pyr = self.__getattr__( 'trans_high_layer_{}'.format( i ) )( pyrs_d[ -2 - i ] , commom_guide[ i ] )
 			trans_pyrs.append( trans_pyr ) # LF HF3 HF2 HF1
 			
-		# 增强图像的高频部分和对比图像的低频重组
-		Dark_pyrs=trans_pyrs.copy()
-		Dark_pyrs[0]=pyrs_l[-1]#亮图的LF替换暗图的LF
-		Dark_light=self.lap_pyramid.pyramid_recons( Dark_pyrs)
-
-		Dark_enh = self.lap_pyramid.pyramid_recons( trans_pyrs )# 正常增强图像
+		# HF_l + LF_l
+		for i in range(len(trans_pyrs)):
+			recon_pyrs.append(pyrs_l[len(trans_pyrs)-1-i]) # 取 HF_l + LF_l
 		
-		# with torch.no_grad():
-		# 	_cut=np.transpose( Dark_light[ 0 ].cpu().numpy() , (1 , 2 , 0) )
-		# 	_cut = (_cut * 255).astype( np.uint8 )
-		#
-		# 	# 显示图像
-		# 	plt.imshow( _cut )
-		# 	plt.axis( 'off' )
-		# 	plt.show()
+		# HF_d + LF_l
+		trans_pyrs[0]=recon_pyrs[0]
 		
-		return Dark_enh ,Dark_light
+		HF_l_LF_l=self.lap_pyramid.pyramid_recons( recon_pyrs )
+		HF_d_LF_l= self.lap_pyramid.pyramid_recons( trans_pyrs )
+		
+		return HF_d_LF_l ,HF_l_LF_l
 
 
 class VGG16( nn.Module ) :
@@ -379,7 +383,21 @@ class VGG16( nn.Module ) :
 		conf_pal1 = list()
 		loc_pal2 = list()
 		conf_pal2 = list()
-
+		
+		# print('增强暗图')
+		# image = np.transpose( Light_dark[ 0 ].detach().cpu().numpy() , (1 , 2 , 0) )  # 调整维度顺序 [C, H, W] → [H, W, C]
+		# image = (image * 255).astype( np.uint8 )
+		# plt.imshow( image )
+		# plt.axis( 'off' )
+		# plt.show()
+		
+		# print( '亮光暗图' )
+		# image = np.transpose( Dark_light[ 0 ].detach().cpu().numpy() , (1 , 2 , 0) )  # 调整维度顺序 [C, H, W] → [H, W, C]
+		# image = (image * 255).astype( np.uint8 )
+		# plt.imshow( image )
+		# plt.axis( 'off' )
+		# plt.show()
+		
 		# 这里应该获得1,64,640,640的张量
 		for i in range(5) :
 			Light_dark=self.vgg[i]( Light_dark)
@@ -500,29 +518,289 @@ class DSFD( nn.Module ) :
 		super().__init__()
 		# enhancement
 		self.enhancement = DENet()
-
-		self.transform = transforms.Compose( transforms.ToPILImage() )
 		# backbone
-		self.backbone = VGG16( phase , base , extras , fem , head1 , head2 , num_classes )
-
+		self.phase = phase
+		self.num_classes = num_classes
+		self.vgg = nn.ModuleList( base )  # 3个vgg16
+		
+		self.L2Normof1 = L2Norm( 256 , 10 )
+		self.L2Normof2 = L2Norm( 512 , 8 )
+		self.L2Normof3 = L2Norm( 512 , 5 )
+		
+		self.extras = nn.ModuleList( extras )
+		self.fpn_topdown = nn.ModuleList( fem[ 0 ] )
+		self.fpn_latlayer = nn.ModuleList( fem[ 1 ] )
+		
+		self.fpn_fem = nn.ModuleList( fem[ 2 ] )
+		
+		self.L2Normef1 = L2Norm( 256 , 10 )
+		self.L2Normef2 = L2Norm( 512 , 8 )
+		self.L2Normef3 = L2Norm( 512 , 5 )
+		
+		self.loc_pal1 = nn.ModuleList( head1[ 0 ] )  # nn.ModuleList是一种存储子模块的工具
+		self.conf_pal1 = nn.ModuleList( head1[ 1 ] )
+		
+		self.loc_pal2 = nn.ModuleList( head2[ 0 ] )
+		self.conf_pal2 = nn.ModuleList( head2[ 1 ] )
+		
+		self.KL = DistillKL( T = 2 )
+		
+		if self.phase == 'test' :
+			self.softmax = nn.Softmax( dim = -1 )
+			self.detect = Detect( cfg )
+		
 	def test_forward( self , x_dark , x_light ) :
 		with torch.no_grad() :
-			x1 , Dark_light  = self.enhancement( x_dark = x_dark , x_light = x_light)
+			HF_d_LF_l , HF_l_LF_l = self.enhancement( x_dark = x_dark , x_light = x_light )  # 返回值是归一的
+			
+			x = HF_d_LF_l
+			f_LL = HF_l_LF_l
+			
+			size = x.size()[ 2 : ]
+			pal1_sources = list()
+			loc_pal1 = list()
+			conf_pal1 = list()
+			loc_pal2 = list()
+			conf_pal2 = list()
+			
+			for k in range( 16 ) :  # vgg13: 14 vgg16: 16
+				x = self.vgg[ k ]( x )
+				if k == 4 :
+					f_DL = x  # HF_D_LF_l
+			# 这里应该获得1,64,640,640的张量
+			for i in range( 5 ) :
+				f_LL = self.vgg[ i ]( f_LL )  # HF_l_LF_l
+			
+			# 这里要控制LF相同，HF不同，使暗图高频增强有效果
+			_f_DL = f_DL.flatten( start_dim = 2 ).mean( dim = -1 )
+			_f_LL = f_LL.flatten( start_dim = 2 ).mean( dim = -1 )
+			
+			loss_mutual = cfg.WEIGHT.MC * (
+					self.KL( _f_DL , _f_LL ) + self.KL( _f_LL , _f_DL ))
+			
+			of1 = x  # 16个vgg后的输出
+			s = self.L2Normof1( of1 )
+			pal1_sources.append( s )
+			# apply vgg up to fc7
+			for k in range( 16 , 23 ) :  # vgg13: 14,19 vgg16: 16,23
+				x = self.vgg[ k ]( x )
+			of2 = x
+			s = self.L2Normof2( of2 )
+			pal1_sources.append( s )
+			
+			for k in range( 23 , 30 ) :  # vgg13: 19,24 vgg16: 23,30
+				x = self.vgg[ k ]( x )
+			of3 = x
+			s = self.L2Normof3( of3 )
+			pal1_sources.append( s )
+			
+			for k in range( 30 , len( self.vgg ) ) :  # vgg13: 24 vgg16: 30
+				x = self.vgg[ k ]( x )
+			of4 = x
+			pal1_sources.append( of4 )
+			
+			for k in range( 2 ) :
+				x = F.relu( self.extras[ k ]( x ) , inplace = True )
+			of5 = x
+			pal1_sources.append( of5 )
+			for k in range( 2 , 4 ) :
+				x = F.relu( self.extras[ k ]( x ) , inplace = True )
+			of6 = x
+			pal1_sources.append( of6 )
+			
+			conv7 = F.relu( self.fpn_topdown[ 0 ]( of6 ) , inplace = True )
+			
+			x = F.relu( self.fpn_topdown[ 1 ]( conv7 ) , inplace = True )
+			conv6 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 0 ]( of5 ) ) , inplace = True )
+			
+			x = F.relu( self.fpn_topdown[ 2 ]( conv6 ) , inplace = True )
+			convfc7_2 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 1 ]( of4 ) ) , inplace = True )
+			
+			x = F.relu( self.fpn_topdown[ 3 ]( convfc7_2 ) , inplace = True )
+			conv5 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 2 ]( of3 ) ) , inplace = True )
+			
+			x = F.relu( self.fpn_topdown[ 4 ]( conv5 ) , inplace = True )
+			conv4 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 3 ]( of2 ) ) , inplace = True )
+			
+			x = F.relu( self.fpn_topdown[ 5 ]( conv4 ) , inplace = True )
+			conv3 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 4 ]( of1 ) ) , inplace = True )
+			
+			ef1 = self.fpn_fem[ 0 ]( conv3 )
+			ef1 = self.L2Normef1( ef1 )
+			ef2 = self.fpn_fem[ 1 ]( conv4 )
+			ef2 = self.L2Normef2( ef2 )
+			ef3 = self.fpn_fem[ 2 ]( conv5 )
+			ef3 = self.L2Normef3( ef3 )
+			ef4 = self.fpn_fem[ 3 ]( convfc7_2 )
+			ef5 = self.fpn_fem[ 4 ]( conv6 )
+			ef6 = self.fpn_fem[ 5 ]( conv7 )
+			
+			pal2_sources = (ef1 , ef2 , ef3 , ef4 , ef5 , ef6)
+			for (x , l , c) in zip( pal1_sources , self.loc_pal1 , self.conf_pal1 ) :
+				loc_pal1.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+				conf_pal1.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+			
+			for (x , l , c) in zip( pal2_sources , self.loc_pal2 , self.conf_pal2 ) :
+				loc_pal2.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+				conf_pal2.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+			
+			features_maps = [ ]
+			for i in range( len( loc_pal1 ) ) :
+				feat = [ ]
+				feat += [ loc_pal1[ i ].size( 1 ) , loc_pal1[ i ].size( 2 ) ]
+				features_maps += [ feat ]
+			
+			loc_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal1 ] , 1 )
+			conf_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal1 ] , 1 )
+			
+			loc_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal2 ] , 1 )
+			conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
+			
+			priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
+			self.priors_pal1 = priorbox.forward().requires_grad_( False )
+			priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
+			self.priors_pal2 = priorbox.forward().requires_grad_( False )
+			
+			if self.phase == 'test' :
+				output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
+						conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) ) ,  # conf preds
+				                              self.priors_pal2.type( type( x.data ) ) )
+			
+			else :
+				output = (loc_pal1.view( loc_pal1.size( 0 ) , -1 , 4 ) ,
+				          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
+				          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
+				          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
+	
+		return output,loss_mutual
 
-			out , loss_mutual = self.backbone( x1 , Light_dark = x1 , Dark_light = Dark_light )
-
-		return out,loss_mutual
-
-	# during training, the model takes the paired images, and their pseudo GT illumination maps from the Retinex Decom Net
-	# def forward( self , x_dark ) :#输入x是归一化后的输入
 	def forward( self , x_dark , x_light ) :
 
-		x1 ,Dark_light = self.enhancement( x_dark=x_dark , x_light=x_light )# 返回值是归一的
+		HF_d_LF_l ,HF_l_LF_l = self.enhancement( x_dark=x_dark , x_light=x_light )# 返回值是归一的
+		
+		x=HF_d_LF_l
+		f_LL=HF_l_LF_l
+		
+		size = x.size()[ 2 : ]
+		pal1_sources = list()
+		loc_pal1 = list()
+		conf_pal1 = list()
+		loc_pal2 = list()
+		conf_pal2 = list()
 
-		out,loss_mutual = self.backbone( x1,Light_dark=x1,Dark_light=Dark_light )
+		for k in range( 16 ) :  # vgg13: 14 vgg16: 16
+			x = self.vgg[ k ]( x )
+			if k == 4:
+				f_DL = x # HF_D_LF_l
+		# 这里应该获得1,64,640,640的张量
+		for i in range( 5 ) :
+			f_LL = self.vgg[ i ]( f_LL ) # HF_l_LF_l
+		
+		# 这里要控制LF相同，HF不同，使暗图高频增强有效果
+		_f_DL = f_DL.flatten( start_dim = 2 ).mean( dim = -1 )
+		_f_LL = f_LL.flatten( start_dim = 2 ).mean( dim = -1 )
+		
+		loss_mutual = cfg.WEIGHT.MC * (
+				self.KL( _f_DL , _f_LL ) + self.KL( _f_LL , _f_DL ))
+		
+		
+		of1 = x  # 16个vgg后的输出
+		s = self.L2Normof1( of1 )
+		pal1_sources.append( s )
+		# apply vgg up to fc7
+		for k in range( 16 , 23 ) :  # vgg13: 14,19 vgg16: 16,23
+			x = self.vgg[ k ]( x )
+		of2 = x
+		s = self.L2Normof2( of2 )
+		pal1_sources.append( s )
+		
+		for k in range( 23 , 30 ) :  # vgg13: 19,24 vgg16: 23,30
+			x = self.vgg[ k ]( x )
+		of3 = x
+		s = self.L2Normof3( of3 )
+		pal1_sources.append( s )
+		
+		for k in range( 30 , len( self.vgg ) ) :  # vgg13: 24 vgg16: 30
+			x = self.vgg[ k ]( x )
+		of4 = x
+		pal1_sources.append( of4 )
+		
+		for k in range( 2 ) :
+			x = F.relu( self.extras[ k ]( x ) , inplace = True )
+		of5 = x
+		pal1_sources.append( of5 )
+		for k in range( 2 , 4 ) :
+			x = F.relu( self.extras[ k ]( x ) , inplace = True )
+		of6 = x
+		pal1_sources.append( of6 )
+		
+		conv7 = F.relu( self.fpn_topdown[ 0 ]( of6 ) , inplace = True )
+		
+		x = F.relu( self.fpn_topdown[ 1 ]( conv7 ) , inplace = True )
+		conv6 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 0 ]( of5 ) ) , inplace = True )
+		
+		x = F.relu( self.fpn_topdown[ 2 ]( conv6 ) , inplace = True )
+		convfc7_2 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 1 ]( of4 ) ) , inplace = True )
+		
+		x = F.relu( self.fpn_topdown[ 3 ]( convfc7_2 ) , inplace = True )
+		conv5 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 2 ]( of3 ) ) , inplace = True )
+		
+		x = F.relu( self.fpn_topdown[ 4 ]( conv5 ) , inplace = True )
+		conv4 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 3 ]( of2 ) ) , inplace = True )
+		
+		x = F.relu( self.fpn_topdown[ 5 ]( conv4 ) , inplace = True )
+		conv3 = F.relu( self._upsample_prod( x , self.fpn_latlayer[ 4 ]( of1 ) ) , inplace = True )
+		
+		ef1 = self.fpn_fem[ 0 ]( conv3 )
+		ef1 = self.L2Normef1( ef1 )
+		ef2 = self.fpn_fem[ 1 ]( conv4 )
+		ef2 = self.L2Normef2( ef2 )
+		ef3 = self.fpn_fem[ 2 ]( conv5 )
+		ef3 = self.L2Normef3( ef3 )
+		ef4 = self.fpn_fem[ 3 ]( convfc7_2 )
+		ef5 = self.fpn_fem[ 4 ]( conv6 )
+		ef6 = self.fpn_fem[ 5 ]( conv7 )
+		
+		pal2_sources = (ef1 , ef2 , ef3 , ef4 , ef5 , ef6)
+		for (x , l , c) in zip( pal1_sources , self.loc_pal1 , self.conf_pal1 ) :
+			loc_pal1.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+			conf_pal1.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+		
+		for (x , l , c) in zip( pal2_sources , self.loc_pal2 , self.conf_pal2 ) :
+			loc_pal2.append( l( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+			conf_pal2.append( c( x ).permute( 0 , 2 , 3 , 1 ).contiguous() )
+		
+		features_maps = [ ]
+		for i in range( len( loc_pal1 ) ) :
+			feat = [ ]
+			feat += [ loc_pal1[ i ].size( 1 ) , loc_pal1[ i ].size( 2 ) ]
+			features_maps += [ feat ]
+		
+		loc_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal1 ] , 1 )
+		conf_pal1 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal1 ] , 1 )
+		
+		loc_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in loc_pal2 ] , 1 )
+		conf_pal2 = torch.cat( [ o.view( o.size( 0 ) , -1 ) for o in conf_pal2 ] , 1 )
+		
+		priorbox = PriorBox( size , features_maps , cfg , pal = 1 )
+		self.priors_pal1 = priorbox.forward().requires_grad_( False )
+		priorbox = PriorBox( size , features_maps , cfg , pal = 2 )
+		self.priors_pal2 = priorbox.forward().requires_grad_( False )
+		
+		if self.phase == 'test' :
+			output = self.detect.forward( loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) , self.softmax(
+					conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) ) ,  # conf preds
+			                              self.priors_pal2.type( type( x.data ) ) )
+		
+		else :
+			output = (loc_pal1.view( loc_pal1.size( 0 ) , -1 , 4 ) ,
+			          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
+			          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
+			          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
+		
+		# out,loss_mutual = self.backbone( x1,Light_dark=x1,Dark_light=Dark_light )
 
-		# return
-		return out , loss_mutual
+		return output , loss_mutual
 
 	def load_weights( self , base_file ) :
 		other , ext = os.path.splitext( base_file )
@@ -556,6 +834,10 @@ class DSFD( nn.Module ) :
 		if isinstance( m , nn.BatchNorm2d ) :
 			m.weight.data[ ... ] = 1
 			m.bias.data.zero_()
+			
+	def _upsample_prod( self , x , y ) :
+		_ , _ , H , W = y.size()
+		return F.interpolate( x , size = (H , W) , mode = 'bilinear' ) * y
 
 
 vgg_cfg = [ 64 , 64 , 'M' , 128 , 128 , 'M' , 256 , 256 , 256 , 'C' , 512 , 512 , 512 , 'M' , 512 , 512 , 512 , 'M' ]
