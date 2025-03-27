@@ -556,10 +556,11 @@ class DSFD( nn.Module ) :
 		
 	def test_forward( self , x_dark , x_light ) :
 		with torch.no_grad() :
-			HF_d_LF_l , HF_l_LF_l = self.enhancement( x_dark = x_dark , x_light = x_light )  # 返回值是归一的
+			HF_d_LF_d,HF_d_LF_l , HF_l_LF_l = self.enhancement( x_dark = x_dark , x_light = x_light )  # 返回值是归一的
 			
-			x = HF_d_LF_l
+			x = HF_d_LF_d
 			f_LL = HF_l_LF_l
+			f_DL = HF_d_LF_l
 			
 			size = x.size()[ 2 : ]
 			pal1_sources = list()
@@ -570,10 +571,10 @@ class DSFD( nn.Module ) :
 			
 			for k in range( 16 ) :  # vgg13: 14 vgg16: 16
 				x = self.vgg[ k ]( x )
-				if k == 4 :
-					f_DL = x  # HF_D_LF_l
+			
 			# 这里应该获得1,64,640,640的张量
 			for i in range( 5 ) :
+				f_DL = self.vgg[ i ]( f_DL )  # HF_d_LF_l
 				f_LL = self.vgg[ i ]( f_LL )  # HF_l_LF_l
 			
 			# 这里要控制LF相同，HF不同，使暗图高频增强有效果
@@ -676,8 +677,10 @@ class DSFD( nn.Module ) :
 				          conf_pal1.view( conf_pal1.size( 0 ) , -1 , self.num_classes ) , self.priors_pal1 ,
 				          loc_pal2.view( loc_pal2.size( 0 ) , -1 , 4 ) ,
 				          conf_pal2.view( conf_pal2.size( 0 ) , -1 , self.num_classes ) , self.priors_pal2)
-	
-		return output,loss_mutual
+			
+			# out,loss_mutual = self.backbone( x1,Light_dark=x1,Dark_light=Dark_light )
+			
+			return output , loss_mutual
 
 	def forward( self , x_dark , x_light ) :
 		
