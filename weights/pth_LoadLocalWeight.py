@@ -25,7 +25,7 @@ def LoadLocalW(net,path_oriMod):
 	net.load_state_dict( tar_module_dict )
 	
 	# tar_module_dict=net.state_dict()
-	# torch.save(tar_module_dict,'tar_module_dict.pth')
+	# torch.save(tar_module_dict,'dsfd.pth')
 	return net
 
 # net=build_net('train',1, 'dark')

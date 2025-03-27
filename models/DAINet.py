@@ -315,9 +315,10 @@ class DENet( nn.Module ) :
 		pyrs_d = self.lap_pyramid.pyramid_decom( img = x_dark )
 		pyrs_l = self.lap_pyramid.pyramid_decom( img = x_light )
 
-		# 对暗图增强
-		trans_pyrs = [ ]
-		recon_pyrs=[]
+		trans_pyrs = [ ] # 被处理的金字塔（主通路暗图）
+		reconLL_pyrs=[] # 重组金字塔 HF_l LF_l
+		reconDL_pyrs=[] # 重组金字塔 HF_d LF_l
+		
 		trans_pyr , guide = self.trans_low( pyrs_d[ -1 ] )
 		trans_pyrs.append( trans_pyr )
 
@@ -332,15 +333,19 @@ class DENet( nn.Module ) :
 			
 		# HF_l + LF_l
 		for i in range(len(trans_pyrs)):
-			recon_pyrs.append(pyrs_l[len(trans_pyrs)-1-i]) # 取 HF_l + LF_l
+			reconLL_pyrs.append(pyrs_l[len(trans_pyrs)-1-i]) # 取 HF_l + LF_l
 		
 		# HF_d + LF_l
-		trans_pyrs[0]=recon_pyrs[0]
+		reconDL_pyrs=trans_pyrs.copy()
+		reconDL_pyrs[ 0 ] = reconLL_pyrs[ 0 ]
 		
-		HF_l_LF_l=self.lap_pyramid.pyramid_recons( recon_pyrs )
-		HF_d_LF_l= self.lap_pyramid.pyramid_recons( trans_pyrs )
+		# HF_d + LF_d = trans_pyrs
+
+		HF_d_LF_d= self.lap_pyramid.pyramid_recons( trans_pyrs )
+		HF_l_LF_l=self.lap_pyramid.pyramid_recons( reconLL_pyrs )
+		HF_d_LF_l= self.lap_pyramid.pyramid_recons( reconDL_pyrs )
 		
-		return HF_d_LF_l ,HF_l_LF_l
+		return HF_d_LF_d,HF_d_LF_l ,HF_l_LF_l
 
 
 class VGG16( nn.Module ) :
@@ -675,11 +680,12 @@ class DSFD( nn.Module ) :
 		return output,loss_mutual
 
 	def forward( self , x_dark , x_light ) :
-
-		HF_d_LF_l ,HF_l_LF_l = self.enhancement( x_dark=x_dark , x_light=x_light )# 返回值是归一的
 		
-		x=HF_d_LF_l
+		HF_d_LF_d,HF_d_LF_l ,HF_l_LF_l = self.enhancement( x_dark=x_dark , x_light=x_light )# 返回值是归一的
+
+		x=HF_d_LF_d
 		f_LL=HF_l_LF_l
+		f_DL=HF_d_LF_l
 		
 		size = x.size()[ 2 : ]
 		pal1_sources = list()
@@ -690,10 +696,10 @@ class DSFD( nn.Module ) :
 
 		for k in range( 16 ) :  # vgg13: 14 vgg16: 16
 			x = self.vgg[ k ]( x )
-			if k == 4:
-				f_DL = x # HF_D_LF_l
+			
 		# 这里应该获得1,64,640,640的张量
 		for i in range( 5 ) :
+			f_DL = self.vgg[ i ]( f_DL )  # HF_d_LF_l
 			f_LL = self.vgg[ i ]( f_LL ) # HF_l_LF_l
 		
 		# 这里要控制LF相同，HF不同，使暗图高频增强有效果

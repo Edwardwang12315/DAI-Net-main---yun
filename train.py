@@ -34,7 +34,7 @@ parser = argparse.ArgumentParser(
     description='DSFD face Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--batch_size',
-                    default=3, type=int,
+                    default=10, type=int,
                     help='Batch size for training')
 parser.add_argument('--model',
                     default='dark', type=str,
@@ -260,12 +260,12 @@ def train():
 
             if iteration % 100 == 0:
                 # 每次显示的损失只包含当前一个batch的平均损失
-                tloss = losses
-                tloss_l1 = loss_l1
-                tloss_c1 = loss_c1
-                tloss_l2 = loss_l2
-                tloss_c2 = loss_c2
-                tloss_mu = loss_mu
+                tloss = losses/(batch_idx+1)
+                tloss_l1 = loss_l1/(batch_idx+1)
+                tloss_c1 = loss_c1/(batch_idx+1)
+                tloss_l2 = loss_l2/(batch_idx+1)
+                tloss_c2 = loss_c2/(batch_idx+1)
+                tloss_mu = loss_mu/(batch_idx+1)
                 
                 if local_rank == 0:
                     print('Timer: %.4f' % (t1 - t0))
@@ -278,12 +278,13 @@ def train():
                     print('->> mutual loss:{:.4f}'.format(tloss_mu))
                     print('->>lr:{}'.format(optimizer.param_groups[0]['lr']))
                 
-                losses = 0
-                loss_l1 = 0
-                loss_c1 = 0
-                loss_l2 = 0
-                loss_c2 = 0
-                loss_mu = 0
+                # 这里应该不能清零，后面val有用
+                # losses = 0
+                # loss_l1 = 0
+                # loss_c1 = 0
+                # loss_l2 = 0
+                # loss_c2 = 0
+                # loss_mu = 0
 
             if iteration != 0 and iteration % 5000 == 0:
                 if local_rank == 0:
