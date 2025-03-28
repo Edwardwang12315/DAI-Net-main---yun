@@ -566,11 +566,11 @@ class DSFD( nn.Module ) :
 			HF_d_LF_d , HF_d_LF_l , HF_l_LF_l , HF_l_LF_le = self.enhancement( x_dark = x_dark ,
 			                                                                   x_light = x_light )  # 返回值是归一的
 			
-			x = HF_d_LF_d.copy()
-			f_DD = HF_d_LF_d.copy()
-			f_LL = HF_l_LF_l.copy()
-			f_DL = HF_d_LF_l.copy()
-			f_LLe = HF_l_LF_le.copy()
+			x = HF_d_LF_d
+			f_DD = HF_d_LF_d
+			f_LL = HF_l_LF_l
+			f_DL = HF_d_LF_l
+			f_LLe = HF_l_LF_le
 			
 			size = x.size()[ 2 : ]
 			pal1_sources = list()
