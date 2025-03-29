@@ -163,6 +163,7 @@ def train():
         
         net=LoadLocalW( net,path_oriMod=os.path.join(args.save_folder,'best.pt') )
         net=LoadLocalW(net,path_oriMod = os.path.join(args.save_folder,'DarkFaceFS.pth'))
+        net=LoadLocalW(net,path_oriMod = os.path.join(args.save_folder,'/dark/dsfd_15000.pth'))
 
     # Scaling the lr
     # 设置了根据批次大小和gpu数量调整学习率的机制
