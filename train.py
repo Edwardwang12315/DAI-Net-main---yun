@@ -306,12 +306,12 @@ def val( epoch , net , dsfd_net , criterion ) :
 				targets = [ ann for ann in targets ]
 		img_dark = torch.stack( [ Low_Illumination_Degrading( images[ i ] )[ 0 ] for i in range( images.shape[ 0 ] ) ] ,
 		                        dim = 0 )
-		out , loss_mutual = net.module.test_forward( x_dark = img_dark , x_light = images )
+		out , loss_mutual,loss_enhance = net.module.test_forward( x_dark = img_dark , x_light = images )
 		
 		loss_l_pa1l , loss_c_pal1 = criterion( out[ :3 ] , targets )
 		loss_l_pa12 , loss_c_pal2 = criterion( out[ 3 : ] , targets )
 		
-		loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
+		loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual + loss_enhance
 		
 		losses += loss.item()
 		step += 1
