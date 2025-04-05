@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser( description = 'DSFD face Detector Training With Pytorch' )
 train_set = parser.add_mutually_exclusive_group()
-parser.add_argument( '--batch_size' , default = 8 , type = int , help = 'Batch size for training' )
+parser.add_argument( '--batch_size' , default = 9 , type = int , help = 'Batch size for training' )
 parser.add_argument( '--model' , default = 'dark' , type = str ,
                      choices = [ 'dark' , 'vgg' , 'resnet50' , 'resnet101' , 'resnet152' ] ,
                      help = 'model for training' )
