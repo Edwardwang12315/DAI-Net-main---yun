@@ -65,7 +65,7 @@ def detect_face(img, tmp_shrink):
     if use_cuda:
         x = x.cuda()
     net.eval()
-    y,_ = net.test_forward(x_dark=x,x_light = x)
+    y,_,_ = net.test_forward(x_dark=x,x_light = x)
     detections = y.data.cpu().numpy()
     scale = np.array([img.shape[1], img.shape[0], img.shape[1], img.shape[0]])
 
@@ -210,7 +210,7 @@ def load_models():
     print('build network')
     net = build_net('test', num_classes=2, model='dark')
     net.eval()
-    net.load_state_dict(torch.load('dsfd.pth')) # Set the dir of your model weight ../model/forDAINet/dark/dsfd.pth
+    net.load_state_dict(torch.load('../model/forDAINet/dark/dsfd_405.pth')) # Set the dir of your model weight ../model/forDAINet/dark/dsfd.pth
 
     if use_cuda:
         net = net.cuda()
@@ -245,7 +245,7 @@ if __name__ == '__main__':
     save_path = './result'
 
     def load_images():
-      imglist = glob.glob('2.png') # Set the dir of your test data
+      imglist = glob.glob('3.png') # Set the dir of your test data
       return imglist
 
     ''' Main Test '''

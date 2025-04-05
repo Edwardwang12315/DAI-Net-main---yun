@@ -88,29 +88,29 @@ class Trans_high( nn.Module ) :
 	利用线性变换降低期望，提高方差
 	'''
 	
-	if True:
-		def __init__( self , num_residual_blocks , num_high = 3 ) :
-			super( Trans_high , self ).__init__()
-			
-			self.num_high = num_high
-			
-			model = [ nn.Conv2d( 9 , 64 , 3 , padding = 1 ) ,
-			          nn.LeakyReLU() ]
-			
-			for _ in range( num_residual_blocks ) :
-				model += [ ResidualBlock( 64 ) ]
-			
-			model += [ nn.Conv2d( 64 , 3 , 3 , padding = 1 ) ]
-			
-			self.model = nn.Sequential( *model )
-			
-			for i in range( self.num_high ) :
-				trans_mask_block = nn.Sequential(
+	def __init__( self , num_residual_blocks , num_high = 3 ) :
+		super().__init__()
+		
+		self.num_high = num_high
+		
+		model = [ nn.Conv2d( 9 , 64 , 3 , padding = 1 ) ,
+		          nn.LeakyReLU() ]
+		
+		for _ in range( num_residual_blocks ) :
+			model += [ ResidualBlock( 64 ) ]
+		
+		model += [ nn.Conv2d( 64 , 3 , 3 , padding = 1 ) ]
+		
+		self.model = nn.Sequential( *model )
+		
+		self.trans_mask_block = nn.ModuleList( [
+				nn.Sequential(
 						nn.Conv2d( 3 , 16 , 1 ) ,
 						nn.LeakyReLU() ,
-						nn.Conv2d( 16 , 3 , 1 ) )
-				setattr( self , 'trans_mask_block_{}'.format( str( i ) ) , trans_mask_block )
-		
+						nn.Conv2d( 16 , 3 , 1 )
+				) for _ in range( num_high )
+		] )
+	
 	if False :
 		def __init__( self , ch_blocks = 64 ) :
 			super().__init__()
@@ -123,23 +123,21 @@ class Trans_high( nn.Module ) :
 			                              nn.Conv2d( 16 , 3 , 3 , padding = 1 ) , nn.Sigmoid( ) ,
 			                              )
 	
-	if True:
-		# x:向上guide pyr:原始金字塔 fake_low:转换后低频
-		def forward( self , x , pyr_original , fake_low ) :
+	# x:向上guide pyr:原始金字塔 fake_low:转换后低频
+	def forward( self , x , pyr_original , fake_low ) :
+		
+		pyr_result = [ ]
+		pyr_result.append( fake_low )
+		mask = self.model( x )
+		
+		for i in range( self.num_high ) :
+			mask = nn.functional.interpolate( mask , size = (
+			pyr_original[ -2 - i ].shape[ 2 ] , pyr_original[ -2 - i ].shape[ 3 ]) )
+			result_highfreq = torch.mul( pyr_original[ -2 - i ] , mask ) + pyr_original[ -2 - i ]
+			result_highfreq = self.trans_mask_block[i]( result_highfreq )
+			pyr_result.append( result_highfreq )
 			
-			pyr_result = [ ]
-			pyr_result.append( fake_low )
-			mask = self.model( x )
-			
-			for i in range( self.num_high ) :
-				mask = nn.functional.interpolate( mask , size = (
-				pyr_original[ -2 - i ].shape[ 2 ] , pyr_original[ -2 - i ].shape[ 3 ]) )
-				result_highfreq = torch.mul( pyr_original[ -2 - i ] , mask ) + pyr_original[ -2 - i ]
-				self.trans_mask_block = getattr( self , 'trans_mask_block_{}'.format( str( i ) ) )
-				result_highfreq = self.trans_mask_block( result_highfreq )
-				pyr_result.append( result_highfreq )
-				
-			return pyr_result
+		return pyr_result
 	if False :
 		def forward( self , inputs ) :
 			x = self.encoder( inputs )
@@ -305,22 +303,21 @@ class Trans_low( nn.Module ) :
 	def __init__( self , num_residual_blocks ) :
 		super().__init__()
 		
-		if True:
-			model = [ nn.Conv2d( 3 , 16 , 3 , padding = 1 ) ,
-			          nn.InstanceNorm2d( 16 ) ,
-			          nn.LeakyReLU() ,
-			          nn.Conv2d( 16 , 64 , 3 , padding = 1 ) ,
-			          nn.LeakyReLU() ]
-			
-			for _ in range( num_residual_blocks ) :
-				model += [ ResidualBlock( 64 ) ]
-			
-			model += [ nn.Conv2d( 64 , 16 , 3 , padding = 1 ) ,
-			           nn.LeakyReLU() ,
-			           nn.Conv2d( 16 , 3 , 3 , padding = 1 ) ]
-			
-			self.model = nn.Sequential( *model )
-			
+		model = [ nn.Conv2d( 3 , 16 , 3 , padding = 1 ) ,
+		          nn.InstanceNorm2d( 16 ) ,
+		          nn.LeakyReLU() ,
+		          nn.Conv2d( 16 , 64 , 3 , padding = 1 ) ,
+		          nn.LeakyReLU() ]
+		
+		for _ in range( num_residual_blocks ) :
+			model += [ ResidualBlock( 64 ) ]
+		
+		model += [ nn.Conv2d( 64 , 16 , 3 , padding = 1 ) ,
+		           nn.LeakyReLU() ,
+		           nn.Conv2d( 16 , 3 , 3 , padding = 1 ) ]
+		
+		self.model = nn.Sequential( *model )
+		
 		
 		if False:
 			self.contrast=CBAM(ch_blocks)
@@ -348,10 +345,9 @@ class Trans_low( nn.Module ) :
 			
 	def forward( self , inputs ) :
 		
-		if True:
-			out = inputs + self.model( inputs )
-			out = torch.tanh( out )
-			return out
+		out = inputs + self.model( inputs )
+		out = torch.tanh( out )
+		return out
 		
 		if False:
 			# print(f'LF数据：{inputs}')
@@ -373,15 +369,14 @@ class Trans_low( nn.Module ) :
 			return x
 
 class DENet( nn.Module ) :
-	if True:
-		def __init__( self , nrb_low = 5 , nrb_high = 3 , num_high = 3 ) :
-			super( ).__init__()
-			
-			self.lap_pyramid = Lap_Pyramid_Conv( num_high )
-			trans_low = Trans_low( nrb_low )
-			trans_high = Trans_high( nrb_high , num_high = num_high )
-			self.trans_low = trans_low.cuda()
-			self.trans_high = trans_high.cuda()
+	def __init__( self , nrb_low = 5 , nrb_high = 3 , num_high = 3 ) :
+		super( ).__init__()
+		
+		self.lap_pyramid = Lap_Pyramid_Conv( num_high )
+		trans_low = Trans_low( nrb_low )
+		trans_high = Trans_high( nrb_high , num_high = num_high )
+		self.trans_low = trans_low.cuda()
+		self.trans_high = trans_high.cuda()
 	
 	if False:
 		def __init__( self , num_high = 3 , ch_blocks = 32 , up_ksize = 1 , high_ch = 32 , high_ksize = 3 , ch_mask = 32 ,
@@ -400,39 +395,38 @@ class DENet( nn.Module ) :
 			# 	self.__setattr__( 'down_finetune_layer_{}'.format( i-1 ) , down_finetune( kernel_size = 3 , channels = 3 ) )
 		
 		# (HF_d + LF_l) VS (HF_l + LF_l) 增强模块提取高频信号效果好；输出图像是亮度良好的。
-		
-	if True:
-		def forward( self , x_dark,x_light ) :
-			# HF1 HF2 HF3 LF
-			pyrs_d = self.lap_pyramid.pyramid_decom( img = x_dark )
-			pyrs_l = self.lap_pyramid.pyramid_decom( img = x_light )
-			trans_LF = self.trans_low( pyrs_d[ -1 ] )
-			LF_guide = nn.functional.interpolate( pyrs_d[ -1 ] ,
-			                                       size = (pyrs_d[ -2 ].shape[ 2 ] , pyrs_d[ -2 ].shape[ 3 ]) )
-			LF_B_guide = nn.functional.interpolate( trans_LF ,
-			                                       size = (pyrs_d[ -2 ].shape[ 2 ] , pyrs_d[ -2 ].shape[ 3 ]) )
-			high_with_low = torch.cat( [ pyrs_d[ -2 ] , LF_guide , LF_B_guide ] , 1 )
-			
-			pyrs_trans = self.trans_high( high_with_low , pyrs_d , trans_LF )
-			
-			reconLL_pyrs=[]
-			for i in range( len( pyrs_l ) ) :
-				reconLL_pyrs.append( pyrs_l[ len( pyrs_l ) - 1 - i ] )  # 取 HF_l + LF_l
 
-			reconDL_pyrs=[]
-			reconDL_pyrs.append( pyrs_l[ -1 ] )
-			for i in range( len( pyrs_d )-1 ) :
-				reconDL_pyrs.append( pyrs_trans[ i+1 ] )  # 取 HF_d + LF_l
-			
-			reconLD_pyrs=reconLL_pyrs.copy()
-			reconLD_pyrs[0] = pyrs_trans[0] # 取 HF_l + LF_d
-			
-			HF_d_LF_d = self.lap_pyramid.pyramid_recons( pyrs_trans )
-			HF_l_LF_l = self.lap_pyramid.pyramid_recons( reconLL_pyrs )
-			HF_d_LF_l = self.lap_pyramid.pyramid_recons( reconDL_pyrs )
-			HF_l_LF_d = self.lap_pyramid.pyramid_recons( reconLD_pyrs )
-			
-			return HF_d_LF_d , HF_d_LF_l , HF_l_LF_l ,HF_l_LF_d
+	def forward( self , x_dark,x_light ) :
+		# HF1 HF2 HF3 LF
+		pyrs_d = self.lap_pyramid.pyramid_decom( img = x_dark )
+		pyrs_l = self.lap_pyramid.pyramid_decom( img = x_light )
+		trans_LF = self.trans_low( pyrs_d[ -1 ] )
+		LF_guide = nn.functional.interpolate( pyrs_d[ -1 ] ,
+		                                       size = (pyrs_d[ -2 ].shape[ 2 ] , pyrs_d[ -2 ].shape[ 3 ]) )
+		LF_B_guide = nn.functional.interpolate( trans_LF ,
+		                                       size = (pyrs_d[ -2 ].shape[ 2 ] , pyrs_d[ -2 ].shape[ 3 ]) )
+		high_with_low = torch.cat( [ pyrs_d[ -2 ] , LF_guide , LF_B_guide ] , 1 )
+		
+		pyrs_trans = self.trans_high( high_with_low , pyrs_d , trans_LF )
+		
+		reconLL_pyrs=[]
+		for i in range( len( pyrs_l ) ) :
+			reconLL_pyrs.append( pyrs_l[ len( pyrs_l ) - 1 - i ] )  # 取 HF_l + LF_l
+
+		reconDL_pyrs=[]
+		reconDL_pyrs.append( pyrs_l[ -1 ] )
+		for i in range( len( pyrs_d )-1 ) :
+			reconDL_pyrs.append( pyrs_trans[ i+1 ] )  # 取 HF_d + LF_l
+		
+		reconLD_pyrs=reconLL_pyrs.copy()
+		reconLD_pyrs[0] = pyrs_trans[0] # 取 HF_l + LF_d
+		
+		HF_d_LF_d = self.lap_pyramid.pyramid_recons( pyrs_trans )
+		HF_l_LF_l = self.lap_pyramid.pyramid_recons( reconLL_pyrs )
+		HF_d_LF_l = self.lap_pyramid.pyramid_recons( reconDL_pyrs )
+		HF_l_LF_d = self.lap_pyramid.pyramid_recons( reconLD_pyrs )
+		
+		return HF_d_LF_d , HF_d_LF_l , HF_l_LF_l ,HF_l_LF_d
 		
 	if False:
 		def forward( self , x_dark , x_light ) :

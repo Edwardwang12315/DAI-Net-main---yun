@@ -179,7 +179,7 @@ def train() :
 		loss_mu = 0
 		loss_en = 0
 		
-		_epoch = epoch % 30
+		_epoch = epoch % 40
 		
 		if _epoch == 0 :
 			for param in net.module.backbone.parameters() :
@@ -202,6 +202,18 @@ def train() :
 				param.requires_grad = False
 			net.module.enhancement.eval()
 			print( '只训练检测模块' )
+		elif _epoch == 30 :
+			for param in net.module.backbone.parameters() :
+				param.requires_grad = True
+			net.module.backbone.train()
+			
+			for name , param in net.module.enhancement.named_parameters() :
+				if 'lap_pyramid' in name :
+					param.requires_grad = False
+				else :
+					param.requires_grad = True
+			net.module.enhancement.train()
+			print( '全训练' )
 		
 		# print(f"###epoch{epoch} is working")
 		for batch_idx , (images , targets , _) in enumerate( train_loader ) :
@@ -306,12 +318,12 @@ def val( epoch , net , dsfd_net , criterion ) :
 				targets = [ ann for ann in targets ]
 		img_dark = torch.stack( [ Low_Illumination_Degrading( images[ i ] )[ 0 ] for i in range( images.shape[ 0 ] ) ] ,
 		                        dim = 0 )
-		out , loss_mutual,loss_enhance = net.module.test_forward( x_dark = img_dark , x_light = images )
+		out , loss_mutual = net.module.test_forward( x_dark = img_dark , x_light = images )
 		
 		loss_l_pa1l , loss_c_pal1 = criterion( out[ :3 ] , targets )
 		loss_l_pa12 , loss_c_pal2 = criterion( out[ 3 : ] , targets )
 		
-		loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual + loss_enhance
+		loss = loss_l_pa1l + loss_c_pal1 + loss_l_pa12 + loss_c_pal2 + loss_mutual
 		
 		losses += loss.item()
 		step += 1
