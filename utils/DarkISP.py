@@ -16,8 +16,8 @@ def apply_ccm(image, ccm):
 
 def random_noise_levels():
     """Generates random shot and read noise from a log-log linear distribution."""
-    log_min_shot_noise = np.log(0.00001) # np.log(0.0001)
-    log_max_shot_noise = np.log(0.0001) # np.log(0.012)
+    log_min_shot_noise = np.log(0.0001)
+    log_max_shot_noise = np.log(0.012)
     log_shot_noise = np.random.uniform(log_min_shot_noise, log_max_shot_noise)
     shot_noise = np.exp(log_shot_noise)
 
@@ -45,12 +45,12 @@ def Low_Illumination_Degrading(img, safe_invert=False):
     '''
     device = img.device
     # 模拟低光照条件的图像参数范围
-    config = dict(darkness_range= (0.2 , 0.5),#黑暗度
-                           gamma_range=(1.5 , 3.5),#伽马值
-                           rgb_range= (1.0,0.1),
-                           red_range=(1.5,2.0),
-                           blue_range= (1.2,1.6),
-                           quantisation=[12, 14, 16])
+    config = dict(darkness_range= (0.01, 0.1),#黑暗度
+                           gamma_range=(2.0, 3.5),#伽马值
+                           rgb_range= (0.8 , 0.1),
+                           red_range=(1.9 , 2.4),
+                           blue_range = (1.5 , 1.9) , # (1.2,1.6), # (1.5 , 1.9) ,  # Blue gain range
+			            quantisation=[12, 14, 16])
     # camera color matrix
     xyz2cams = [[[1.0234, -0.2969, -0.2266],
                  [-0.5625, 1.6328, -0.0469],
