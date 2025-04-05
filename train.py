@@ -283,8 +283,7 @@ def train() :
 					print( '->> pal1 conf loss:{:.4f} || pal1 loc loss:{:.4f}'.format( tloss_c1 , tloss_l1 ) )
 					print( '->> pal2 conf loss:{:.4f} || pal2 loc loss:{:.4f}'.format( tloss_c2 , tloss_l2 ) )
 					print( '->> mutual loss:{:.4f} || enhanced loss:{:.4f}'.format( tloss_mu , tloss_en ) )
-					print( '->>lr:{}'.format( optimizer.param_groups[ 0 ][ 'lr' ] ) )
-			
+					print( '->>lr:{}'.format( optimizer.param_groups[ 0 ][ 'lr' ] ) )			
 			# 这里应该不能清零，后面val有用  # losses = 0  # loss_l1 = 0  # loss_c1 = 0  # loss_l2 = 0  # loss_c2 = 0  # loss_mu = 0
 			
 			if iteration != 0 and iteration % 5000 == 0 :
@@ -318,7 +317,7 @@ def val( epoch , net , dsfd_net , criterion ) :
 				targets = [ ann for ann in targets ]
 		img_dark = torch.stack( [ Low_Illumination_Degrading( images[ i ] )[ 0 ] for i in range( images.shape[ 0 ] ) ] ,
 		                        dim = 0 )
-		out , loss_mutual = net.module.test_forward( x_dark = img_dark , x_light = images )
+		out , loss_mutual,_ = net.module.test_forward( x_dark = img_dark , x_light = images )
 		
 		loss_l_pa1l , loss_c_pal1 = criterion( out[ :3 ] , targets )
 		loss_l_pa12 , loss_c_pal2 = criterion( out[ 3 : ] , targets )
